@@ -1,38 +1,54 @@
 <script setup>
-import { onMounted, onBeforeUnmount, ref } from 'vue'
+
+import {
+  onMounted,
+  onBeforeUnmount,
+  ref,
+  watch
+} from 'vue'
+
 import L from 'leaflet'
-import axios from 'axios'
+
 import 'leaflet/dist/leaflet.css'
 
-// ------------------------------------
-// PROPS
-// ------------------------------------
+import {
+  getEmergencies
+} from '../services/api'
+
+// Fix Leaflet marker icons
+delete L.Icon.Default.prototype
+  ._getIconUrl
+
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl:
+    'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+
+  iconUrl:
+    'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+
+  shadowUrl:
+    'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png'
+})
 
 const props = defineProps({
-  volunteerId: {
-    type: String,
-    default: ''
+  focusLocation: {
+    type: Object,
+    default: null
   }
 })
 
-// ------------------------------------
-// EVENTS
-// ------------------------------------
-
 const emit = defineEmits([
-  'location-selected',
-  'emergencies-updated'
+  'location-selected'
 ])
-
-// ------------------------------------
-// MAP
-// ------------------------------------
 
 const mapContainer = ref(null)
 
 let map = null
+
 let selectedMarker = null
+
 let emergencyLayer = null
+
 let refreshInterval = null
 
 // ------------------------------------
@@ -40,19 +56,7 @@ let refreshInterval = null
 // ------------------------------------
 
 onMounted(() => {
-  initializeMap()
 
-  // Make functions available to
-  // Leaflet popup buttons
-  window.acceptEmergency = acceptEmergency
-  window.resolveEmergency = resolveEmergency
-})
-
-// ------------------------------------
-// INITIALIZE MAP
-// ------------------------------------
-
-const initializeMap = () => {
   map = L.map(
     mapContainer.value
   ).setView(
@@ -60,51 +64,77 @@ const initializeMap = () => {
     12
   )
 
-  // ------------------------------------
-  // OPEN STREET MAP
-  // ------------------------------------
-
   L.tileLayer(
     'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
     {
       maxZoom: 19,
+
       attribution:
         '&copy; OpenStreetMap contributors'
     }
   ).addTo(map)
 
-  // ------------------------------------
-  // EMERGENCY LAYER
-  // ------------------------------------
-
   emergencyLayer =
     L.layerGroup().addTo(map)
-
-  // ------------------------------------
-  // MAP CLICK
-  // ------------------------------------
 
   map.on(
     'click',
     handleMapClick
   )
 
-  // ------------------------------------
-  // INITIAL LOAD
-  // ------------------------------------
-
   loadEmergencies()
-
-  // ------------------------------------
-  // AUTO REFRESH
-  // ------------------------------------
 
   refreshInterval =
     setInterval(
       loadEmergencies,
       5000
     )
-}
+
+})
+
+
+// ------------------------------------
+// WATCH MAP FOCUS
+// ------------------------------------
+
+watch(
+  () => props.focusLocation,
+  (location) => {
+
+    if (
+      !location ||
+      !map
+    ) {
+      return
+    }
+
+    const latitude =
+      Number(location.latitude)
+
+    const longitude =
+      Number(location.longitude)
+
+    if (
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude)
+    ) {
+      return
+    }
+
+    map.flyTo(
+      [latitude, longitude],
+      15,
+      {
+        duration: 1
+      }
+    )
+
+  },
+  {
+    deep: true
+  }
+)
+
 
 // ------------------------------------
 // MAP CLICK
@@ -118,30 +148,13 @@ const handleMapClick = (event) => {
   const longitude =
     event.latlng.lng
 
-  console.log(
-    '📍 Selected location:'
-  )
-
-  console.log(
-    'Latitude:',
-    latitude
-  )
-
-  console.log(
-    'Longitude:',
-    longitude
-  )
-
-  // Remove previous marker
-
   if (selectedMarker) {
 
     map.removeLayer(
       selectedMarker
     )
-  }
 
-  // Add new marker
+  }
 
   selectedMarker =
     L.marker([
@@ -150,26 +163,16 @@ const handleMapClick = (event) => {
     ]).addTo(map)
 
   selectedMarker
-    .bindPopup(
-      `
-        <strong>
-          Selected Location
-        </strong>
-
-        <br>
-
-        Latitude:
-        ${latitude.toFixed(6)}
-
-        <br>
-
-        Longitude:
-        ${longitude.toFixed(6)}
-      `
-    )
+    .bindPopup(`
+      <strong>Selected Location</strong>
+      <br>
+      Latitude:
+      ${latitude.toFixed(6)}
+      <br>
+      Longitude:
+      ${longitude.toFixed(6)}
+    `)
     .openPopup()
-
-  // Send location to App.vue
 
   emit(
     'location-selected',
@@ -178,630 +181,407 @@ const handleMapClick = (event) => {
       longitude
     }
   )
+
 }
+
 
 // ------------------------------------
 // LOAD EMERGENCIES
 // ------------------------------------
 
-const loadEmergencies =
-  async () => {
+const loadEmergencies = async () => {
 
-    try {
+  try {
 
-      const response =
-        await axios.get(
-          'http://localhost:3000/api/emergencies'
-        )
+    const response =
+      await getEmergencies()
 
-      const emergencies =
-        response.data.emergencies || []
+    const emergencies =
+      response.emergencies || []
 
-      console.log(
-        `📍 Loaded ${emergencies.length} emergencies`
-      )
-
-      // Update map
-
-      displayEmergencies(
-        emergencies
-      )
-
-      // Send latest data to App.vue
-
-      emit(
-        'emergencies-updated',
-        emergencies
-      )
-
-    } catch (error) {
-
-      console.error(
-        '❌ Failed to load emergencies:',
-        error.message
-      )
-    }
-  }
-
-// ------------------------------------
-// DISPLAY EMERGENCIES
-// ------------------------------------
-
-const displayEmergencies =
-  (emergencies) => {
-
-    if (!emergencyLayer) {
-      return
-    }
-
-    // Remove old markers
-
-    emergencyLayer.clearLayers()
-
-    emergencies.forEach(
-      (emergency) => {
-
-        // Ignore invalid locations
-
-        if (
-          emergency.latitude == null ||
-          emergency.longitude == null
-        ) {
-          return
-        }
-
-        const color =
-          getPriorityColor(
-            emergency.priority
-          )
-
-        // --------------------------------
-        // MARKER
-        // --------------------------------
-
-        const marker =
-          L.circleMarker(
-            [
-              Number(
-                emergency.latitude
-              ),
-
-              Number(
-                emergency.longitude
-              )
-            ],
-            {
-              radius: 10,
-              fillColor: color,
-              color: '#ffffff',
-              weight: 3,
-              opacity: 1,
-              fillOpacity: 0.9
-            }
-          )
-
-        // --------------------------------
-        // CHECK CURRENT VOLUNTEER
-        // --------------------------------
-
-        let currentVolunteerId =
-          props.volunteerId
-
-        if (!currentVolunteerId) {
-
-          currentVolunteerId =
-            localStorage.getItem(
-              'aidmap-volunteer-id'
-            )
-        }
-
-        const isMyEmergency =
-          emergency.status === 'accepted' &&
-          emergency.assignedVolunteer ===
-            currentVolunteerId
-
-        // --------------------------------
-        // ACTION BUTTON
-        // --------------------------------
-
-        let actionButton = ''
-
-        // Pending emergency
-
-        if (
-          emergency.status ===
-          'pending'
-        ) {
-
-          actionButton = `
-            <button
-              onclick="
-                window.acceptEmergency(
-                  '${emergency._id}'
-                )
-              "
-              style="
-                width:100%;
-                border:none;
-                background:#22c55e;
-                color:white;
-                padding:11px;
-                border-radius:8px;
-                font-weight:700;
-                cursor:pointer;
-                margin-top:5px;
-              "
-            >
-              🙋 I CAN HELP
-            </button>
-          `
-        }
-
-        // Accepted by current volunteer
-
-        else if (isMyEmergency) {
-
-          actionButton = `
-            <button
-              onclick="
-                window.resolveEmergency(
-                  '${emergency._id}'
-                )
-              "
-              style="
-                width:100%;
-                border:none;
-                background:#2563eb;
-                color:white;
-                padding:11px;
-                border-radius:8px;
-                font-weight:700;
-                cursor:pointer;
-                margin-top:5px;
-              "
-            >
-              ✅ MARK AS RESOLVED
-            </button>
-          `
-        }
-
-        // Accepted by another volunteer
-
-        else if (
-          emergency.status ===
-          'accepted'
-        ) {
-
-          actionButton = `
-            <div
-              style="
-                background:#eff6ff;
-                color:#2563eb;
-                padding:10px;
-                border-radius:8px;
-                text-align:center;
-                font-weight:600;
-              "
-            >
-              🙋 Help is on the way
-            </div>
-          `
-        }
-
-        // Resolved
-
-        else if (
-          emergency.status ===
-          'resolved'
-        ) {
-
-          actionButton = `
-            <div
-              style="
-                background:#f0fdf4;
-                color:#16a34a;
-                padding:10px;
-                border-radius:8px;
-                text-align:center;
-                font-weight:600;
-              "
-            >
-              ✅ Resolved
-            </div>
-          `
-        }
-
-        // --------------------------------
-        // POPUP
-        // --------------------------------
-
-        marker.bindPopup(`
-
-          <div
-            style="
-              min-width:230px;
-              font-family:Arial,sans-serif;
-            "
-          >
-
-            <!-- TYPE -->
-
-            <h3
-              style="
-                margin:0 0 10px;
-                font-size:17px;
-                color:#111827;
-              "
-            >
-              🚨
-              ${escapeHtml(
-                emergency.type
-              )}
-            </h3>
-
-            <!-- PRIORITY -->
-
-            <div
-              style="
-                margin-bottom:7px;
-                font-weight:600;
-              "
-            >
-
-              Priority:
-
-              <span
-                style="
-                  color:${color};
-                "
-              >
-                ${escapeHtml(
-                  emergency.priority
-                )}
-              </span>
-
-            </div>
-
-            <!-- STATUS -->
-
-            <div
-              style="
-                margin-bottom:9px;
-                font-size:13px;
-              "
-            >
-
-              Status:
-
-              <strong>
-                ${getStatusText(
-                  emergency.status
-                )}
-              </strong>
-
-            </div>
-
-            <!-- DESCRIPTION -->
-
-            <p
-              style="
-                margin:8px 0;
-                color:#374151;
-                font-size:13px;
-              "
-            >
-              ${escapeHtml(
-                emergency.description
-              )}
-            </p>
-
-            <!-- LOCATION -->
-
-            <div
-              style="
-                font-size:11px;
-                color:#6b7280;
-                margin-bottom:12px;
-              "
-            >
-
-              📍
-
-              ${Number(
-                emergency.latitude
-              ).toFixed(5)},
-
-              ${Number(
-                emergency.longitude
-              ).toFixed(5)}
-
-            </div>
-
-            <!-- VOLUNTEER -->
-
-            ${
-              emergency.status ===
-              'accepted'
-                ? `
-                  <div
-                    style="
-                      font-size:12px;
-                      color:#6b7280;
-                      margin-bottom:10px;
-                    "
-                  >
-                    🙋 Volunteer assigned
-                  </div>
-                `
-                : ''
-            }
-
-            <!-- ACTION -->
-
-            ${actionButton}
-
-          </div>
-
-        `)
-
-        // Add marker
-
-        marker.addTo(
-          emergencyLayer
-        )
-      }
+    displayEmergencies(
+      emergencies
     )
+
+  } catch (error) {
+
+    console.error(
+      '❌ Failed to load emergencies:',
+      error.message
+    )
+
   }
 
+}
+
+
 // ------------------------------------
-// ACCEPT EMERGENCY
+// DISPLAY
 // ------------------------------------
 
-const acceptEmergency =
-  async (emergencyId) => {
+const displayEmergencies = (
+  emergencies
+) => {
 
-    try {
+  if (!emergencyLayer) {
+    return
+  }
 
-      // --------------------------------
-      // GET VOLUNTEER ID
-      // --------------------------------
+  emergencyLayer.clearLayers()
 
-      let currentVolunteerId =
-        props.volunteerId
+  emergencies.forEach(
+    emergency => {
 
-      if (!currentVolunteerId) {
-
-        currentVolunteerId =
-          localStorage.getItem(
-            'aidmap-volunteer-id'
-          )
-      }
-
-      // --------------------------------
-      // SAFETY CHECK
-      // --------------------------------
-
-      if (!currentVolunteerId) {
-
-        alert(
-          'Volunteer ID is not available. Please refresh the page.'
-        )
-
+      if (
+        emergency.latitude == null ||
+        emergency.longitude == null
+      ) {
         return
       }
 
-      console.log(
-        '🙋 Accept request received'
-      )
+      const latitude =
+        Number(emergency.latitude)
 
-      console.log(
-        'Emergency ID:',
-        emergencyId
-      )
+      const longitude =
+        Number(emergency.longitude)
 
-      console.log(
-        'Volunteer ID:',
-        currentVolunteerId
-      )
+      const color =
+        getPriorityColor(
+          emergency.priority
+        )
 
-      // --------------------------------
-      // SEND TO BACKEND
-      // --------------------------------
-
-      const response =
-        await axios.patch(
-          `http://localhost:3000/api/emergencies/${emergencyId}/accept`,
+      const marker =
+        L.circleMarker(
+          [
+            latitude,
+            longitude
+          ],
           {
-            volunteerId:
-              currentVolunteerId
+            radius:
+              emergency.status ===
+              'resolved'
+                ? 7
+                : 10,
+
+            fillColor: color,
+
+            color: '#ffffff',
+
+            weight: 3,
+
+            opacity: 1,
+
+            fillOpacity:
+              emergency.status ===
+              'resolved'
+                ? 0.55
+                : 0.9
           }
         )
 
-      console.log(
-        '✅ Emergency accepted:',
-        response.data
+      marker.bindPopup(
+        createPopup(
+          emergency,
+          color
+        )
       )
 
-      alert(
-        'You are now helping with this emergency! 🙋'
+      marker.addTo(
+        emergencyLayer
       )
 
-      // Refresh
-
-      await loadEmergencies()
-
-    } catch (error) {
-
-      console.error(
-        '❌ Failed to accept emergency:',
-        error
-      )
-
-      if (error.response) {
-
-        console.error(
-          'Backend response:',
-          error.response.data
-        )
-
-        alert(
-          error.response.data.message ||
-          'Failed to accept emergency.'
-        )
-
-      } else {
-
-        alert(
-          'Could not connect to the server.'
-        )
-      }
     }
+  )
+
+}
+
+
+// ------------------------------------
+// POPUP
+// ------------------------------------
+
+const createPopup = (
+  emergency,
+  color
+) => {
+
+  const volunteer =
+    emergency.assignedVolunteer
+      ? `
+        <div style="
+          margin-top: 8px;
+          color: #6b7280;
+          font-size: 12px;
+        ">
+          👤 Volunteer:
+          <strong>
+            ${escapeHtml(
+              emergency.assignedVolunteer
+            )}
+          </strong>
+        </div>
+      `
+      : ''
+
+  let statusContent = ''
+
+  if (
+    emergency.status ===
+    'pending'
+  ) {
+
+    statusContent = `
+      <div style="
+        margin-top: 10px;
+        padding: 8px;
+        border-radius: 7px;
+        background: #fef3c7;
+        color: #b45309;
+        text-align: center;
+        font-weight: 600;
+        font-size: 12px;
+      ">
+        ⏳ Waiting for a volunteer
+      </div>
+    `
+
+  } else if (
+    emergency.status ===
+    'accepted'
+  ) {
+
+    statusContent = `
+      <div style="
+        margin-top: 10px;
+        padding: 8px;
+        border-radius: 7px;
+        background: #dbeafe;
+        color: #2563eb;
+        text-align: center;
+        font-weight: 600;
+        font-size: 12px;
+      ">
+        🙋 Help is on the way
+      </div>
+    `
+
+  } else {
+
+    statusContent = `
+      <div style="
+        margin-top: 10px;
+        padding: 8px;
+        border-radius: 7px;
+        background: #dcfce7;
+        color: #16a34a;
+        text-align: center;
+        font-weight: 600;
+        font-size: 12px;
+      ">
+        ✅ Resolved
+      </div>
+    `
+
   }
 
+  return `
+    <div style="
+      min-width: 220px;
+    ">
+
+      <h3 style="
+        margin: 0 0 8px;
+        font-size: 16px;
+      ">
+        ${getIcon(emergency.type)}
+        ${escapeHtml(
+          emergency.type
+        )}
+      </h3>
+
+      <div style="
+        margin-bottom: 6px;
+        font-weight: 600;
+      ">
+
+        Priority:
+
+        <span style="
+          color: ${color};
+        ">
+          ${escapeHtml(
+            emergency.priority
+          )}
+        </span>
+
+      </div>
+
+      <div style="
+        margin-bottom: 8px;
+        font-size: 12px;
+      ">
+
+        Status:
+        <strong>
+          ${escapeHtml(
+            emergency.status
+          )}
+        </strong>
+
+      </div>
+
+      <p style="
+        margin: 8px 0;
+        color: #374151;
+        font-size: 13px;
+      ">
+
+        ${escapeHtml(
+          emergency.description
+        )}
+
+      </p>
+
+      <div style="
+        font-size: 11px;
+        color: #6b7280;
+      ">
+
+        📍
+        ${latitudeText(
+          emergency.latitude
+        )},
+        ${longitudeText(
+          emergency.longitude
+        )}
+
+      </div>
+
+      ${volunteer}
+
+      ${statusContent}
+
+    </div>
+  `
+}
+
+
 // ------------------------------------
-// RESOLVE EMERGENCY
+// ICON
 // ------------------------------------
 
-const resolveEmergency =
-  async (emergencyId) => {
+const getIcon = (type) => {
 
-    try {
-
-      console.log(
-        '✅ Resolve request received'
-      )
-
-      console.log(
-        'Emergency ID:',
-        emergencyId
-      )
-
-      // --------------------------------
-      // SEND TO BACKEND
-      // --------------------------------
-
-      const response =
-        await axios.patch(
-          `http://localhost:3000/api/emergencies/${emergencyId}/resolve`
-        )
-
-      console.log(
-        '✅ Emergency resolved:',
-        response.data
-      )
-
-      alert(
-        'Emergency marked as resolved! ✅'
-      )
-
-      // Refresh markers
-
-      await loadEmergencies()
-
-    } catch (error) {
-
-      console.error(
-        '❌ Failed to resolve emergency:',
-        error
-      )
-
-      if (error.response) {
-
-        console.error(
-          'Backend response:',
-          error.response.data
-        )
-
-        alert(
-          error.response.data.message ||
-          'Failed to resolve emergency.'
-        )
-
-      } else {
-
-        alert(
-          'Could not connect to the server.'
-        )
-      }
-    }
+  const icons = {
+    Water: '💧',
+    Medical: '🏥',
+    Food: '🍱',
+    Rescue: '🛟',
+    Shelter: '🏠',
+    Power: '⚡'
   }
 
-// ------------------------------------
-// STATUS TEXT
-// ------------------------------------
+  return icons[type] || '🚨'
+}
 
-const getStatusText =
-  (status) => {
-
-    switch (status) {
-
-      case 'accepted':
-        return '🔵 Help is on the way'
-
-      case 'resolved':
-        return '✅ Resolved'
-
-      default:
-        return '🟡 Waiting for help'
-    }
-  }
 
 // ------------------------------------
 // PRIORITY COLOR
 // ------------------------------------
 
-const getPriorityColor =
-  (priority) => {
+const getPriorityColor = (
+  priority
+) => {
 
-    switch (priority) {
+  switch (priority) {
 
-      case 'Critical':
-        return '#ef4444'
+    case 'Critical':
+      return '#ef4444'
 
-      case 'Medium':
-        return '#f59e0b'
+    case 'Medium':
+      return '#f59e0b'
 
-      case 'Low':
-        return '#22c55e'
+    case 'Low':
+      return '#22c55e'
 
-      default:
-        return '#6b7280'
-    }
+    default:
+      return '#6b7280'
+
   }
+
+}
+
+
+// ------------------------------------
+// FORMAT COORDINATES
+// ------------------------------------
+
+const latitudeText = (
+  value
+) => {
+
+  const number =
+    Number(value)
+
+  return Number.isFinite(number)
+    ? number.toFixed(5)
+    : '--'
+
+}
+
+const longitudeText = (
+  value
+) => {
+
+  const number =
+    Number(value)
+
+  return Number.isFinite(number)
+    ? number.toFixed(5)
+    : '--'
+
+}
+
 
 // ------------------------------------
 // ESCAPE HTML
 // ------------------------------------
 
-const escapeHtml =
-  (value) => {
+const escapeHtml = (
+  value
+) => {
 
-    if (!value) {
-      return ''
-    }
-
-    return String(value)
-      .replace(
-        /&/g,
-        '&amp;'
-      )
-      .replace(
-        /</g,
-        '&lt;'
-      )
-      .replace(
-        />/g,
-        '&gt;'
-      )
-      .replace(
-        /"/g,
-        '&quot;'
-      )
-      .replace(
-        /'/g,
-        '&#039;'
-      )
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return ''
   }
+
+  return String(value)
+    .replace(
+      /&/g,
+      '&amp;'
+    )
+    .replace(
+      /</g,
+      '&lt;'
+    )
+    .replace(
+      />/g,
+      '&gt;'
+    )
+    .replace(
+      /"/g,
+      '&quot;'
+    )
+    .replace(
+      /'/g,
+      '&#039;'
+    )
+
+}
+
 
 // ------------------------------------
 // CLEANUP
@@ -814,17 +594,15 @@ onBeforeUnmount(() => {
     clearInterval(
       refreshInterval
     )
+
   }
 
   if (map) {
 
     map.remove()
+
   }
 
-  // Remove global functions
-
-  delete window.acceptEmergency
-  delete window.resolveEmergency
 })
 
 </script>
@@ -842,8 +620,10 @@ onBeforeUnmount(() => {
 
 .disaster-map {
   width: 100%;
+
   height: 100%;
-  min-height: 500px;
+
+  min-height: 400px;
 }
 
 </style>

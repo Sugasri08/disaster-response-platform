@@ -8,146 +8,109 @@ const props = defineProps({
   }
 })
 
-const total = computed(() => {
-  return props.emergencies.length
-})
+const total = computed(() =>
+  props.emergencies.length
+)
 
-const pending = computed(() => {
-  return props.emergencies.filter(
-    emergency => emergency.status === 'pending'
+const pending = computed(() =>
+  props.emergencies.filter(
+    emergency =>
+      emergency.status === 'pending'
   ).length
-})
+)
 
-const accepted = computed(() => {
-  return props.emergencies.filter(
-    emergency => emergency.status === 'accepted'
+const accepted = computed(() =>
+  props.emergencies.filter(
+    emergency =>
+      emergency.status === 'accepted'
   ).length
-})
+)
 
-const resolved = computed(() => {
-  return props.emergencies.filter(
-    emergency => emergency.status === 'resolved'
+const resolved = computed(() =>
+  props.emergencies.filter(
+    emergency =>
+      emergency.status === 'resolved'
   ).length
-})
+)
 
-const critical = computed(() => {
-  return props.emergencies.filter(
-    emergency => emergency.priority === 'Critical' &&
-    emergency.status !== 'resolved'
+const critical = computed(() =>
+  props.emergencies.filter(
+    emergency =>
+      emergency.priority === 'Critical' &&
+      emergency.status !== 'resolved'
   ).length
-})
+)
 </script>
 
 <template>
 
   <section class="stats">
 
-    <!-- TOTAL -->
-
     <div class="stat-card">
 
-      <div class="stat-icon total-icon">
+      <div class="stat-icon total">
         🚨
       </div>
 
-      <div class="stat-content">
-
-        <span class="stat-label">
-          Total
-        </span>
-
-        <strong class="stat-value">
-          {{ total }}
-        </strong>
-
+      <div>
+        <span>Total</span>
+        <strong>{{ total }}</strong>
       </div>
 
     </div>
 
-    <!-- PENDING -->
 
     <div class="stat-card">
 
-      <div class="stat-icon pending-icon">
+      <div class="stat-icon pending">
         ⏳
       </div>
 
-      <div class="stat-content">
-
-        <span class="stat-label">
-          Pending
-        </span>
-
-        <strong class="stat-value">
-          {{ pending }}
-        </strong>
-
+      <div>
+        <span>Pending</span>
+        <strong>{{ pending }}</strong>
       </div>
 
     </div>
 
-    <!-- ACCEPTED -->
 
     <div class="stat-card">
 
-      <div class="stat-icon accepted-icon">
+      <div class="stat-icon accepted">
         🙋
       </div>
 
-      <div class="stat-content">
-
-        <span class="stat-label">
-          Accepted
-        </span>
-
-        <strong class="stat-value">
-          {{ accepted }}
-        </strong>
-
+      <div>
+        <span>Accepted</span>
+        <strong>{{ accepted }}</strong>
       </div>
 
     </div>
 
-    <!-- RESOLVED -->
 
     <div class="stat-card">
 
-      <div class="stat-icon resolved-icon">
+      <div class="stat-icon resolved">
         ✅
       </div>
 
-      <div class="stat-content">
-
-        <span class="stat-label">
-          Resolved
-        </span>
-
-        <strong class="stat-value">
-          {{ resolved }}
-        </strong>
-
+      <div>
+        <span>Resolved</span>
+        <strong>{{ resolved }}</strong>
       </div>
 
     </div>
 
-    <!-- CRITICAL -->
 
-    <div class="stat-card critical-card">
+    <div class="stat-card">
 
-      <div class="stat-icon critical-icon">
+      <div class="stat-icon critical">
         🔴
       </div>
 
-      <div class="stat-content">
-
-        <span class="stat-label">
-          Critical
-        </span>
-
-        <strong class="stat-value">
-          {{ critical }}
-        </strong>
-
+      <div>
+        <span>Critical</span>
+        <strong>{{ critical }}</strong>
       </div>
 
     </div>
@@ -159,12 +122,6 @@ const critical = computed(() => {
 <style scoped>
 
 .stats {
-  position: absolute;
-
-  top: 20px;
-  left: 20px;
-  right: 20px;
-
   display: grid;
 
   grid-template-columns:
@@ -172,9 +129,7 @@ const critical = computed(() => {
 
   gap: 12px;
 
-  z-index: 500;
-
-  pointer-events: none;
+  margin-bottom: 18px;
 }
 
 .stat-card {
@@ -185,7 +140,7 @@ const critical = computed(() => {
 
   border-radius: 12px;
 
-  padding: 13px 15px;
+  padding: 13px;
 
   display: flex;
 
@@ -194,81 +149,65 @@ const critical = computed(() => {
   gap: 11px;
 
   box-shadow:
-    0 4px 15px
-    rgba(0, 0, 0, 0.08);
-
-  pointer-events: auto;
+    0 2px 8px
+    rgba(0, 0, 0, 0.04);
 }
 
 .stat-icon {
   width: 38px;
-  height: 38px;
 
-  flex-shrink: 0;
+  height: 38px;
 
   border-radius: 9px;
 
   display: flex;
 
   align-items: center;
+
   justify-content: center;
 
   font-size: 18px;
 }
 
-.total-icon {
+.stat-icon.total {
   background: #fee2e2;
 }
 
-.pending-icon {
+.stat-icon.pending {
   background: #fef3c7;
 }
 
-.accepted-icon {
+.stat-icon.accepted {
   background: #dbeafe;
 }
 
-.resolved-icon {
+.stat-icon.resolved {
   background: #dcfce7;
 }
 
-.critical-icon {
+.stat-icon.critical {
   background: #fee2e2;
 }
 
-.stat-content {
-  display: flex;
+.stat-card span {
+  display: block;
 
-  flex-direction: column;
-
-  gap: 2px;
-}
-
-.stat-label {
   font-size: 11px;
 
   color: #6b7280;
-
-  font-weight: 500;
 }
 
-.stat-value {
-  font-size: 20px;
+.stat-card strong {
+  display: block;
 
-  line-height: 1;
+  margin-top: 2px;
+
+  font-size: 20px;
 
   color: #111827;
 }
 
-.critical-card {
-  border-color: #fecaca;
-}
-
-/* ================================= */
-/* TABLET */
-/* ================================= */
-
-@media (max-width: 1000px) {
+@media (max-width: 900px) {
 
   .stats {
     grid-template-columns:
@@ -277,36 +216,11 @@ const critical = computed(() => {
 
 }
 
-/* ================================= */
-/* MOBILE */
-/* ================================= */
-
-@media (max-width: 650px) {
+@media (max-width: 600px) {
 
   .stats {
-    top: 10px;
-    left: 10px;
-    right: 10px;
-
     grid-template-columns:
       repeat(2, 1fr);
-
-    gap: 8px;
-  }
-
-  .stat-card {
-    padding: 10px;
-  }
-
-  .stat-icon {
-    width: 32px;
-    height: 32px;
-
-    font-size: 15px;
-  }
-
-  .stat-value {
-    font-size: 17px;
   }
 
 }

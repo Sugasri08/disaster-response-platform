@@ -2,138 +2,185 @@
 import { ref } from 'vue'
 import { createEmergency } from '../services/api'
 
-const props = defineProps({
-  location: {
-    type: Object,
-    default: null
-  }
-})
-
 const emit = defineEmits([
   'close',
-  'submitted'
+  'created'
 ])
 
 const selectedType = ref('')
+
 const selectedPriority = ref('Low')
+
 const description = ref('')
+
+const selectedLocation = ref(null)
+
 const submitting = ref(false)
+
+const error = ref('')
+
+// ------------------------------------
+// HELP TYPES
+// ------------------------------------
 
 const helpTypes = [
   {
-    name: 'Water',
+    type: 'Water',
     icon: '💧'
   },
   {
-    name: 'Medical',
+    type: 'Medical',
     icon: '🏥'
   },
   {
-    name: 'Food',
+    type: 'Food',
     icon: '🍱'
   },
   {
-    name: 'Rescue',
+    type: 'Rescue',
     icon: '🛟'
   },
   {
-    name: 'Shelter',
+    type: 'Shelter',
     icon: '🏠'
   },
   {
-    name: 'Power',
+    type: 'Power',
     icon: '⚡'
   }
 ]
+
+// ------------------------------------
+// SELECT TYPE
+// ------------------------------------
 
 const selectHelpType = (type) => {
   selectedType.value = type
 }
 
+// ------------------------------------
+// SELECT LOCATION
+// ------------------------------------
+
+const selectLocation = () => {
+
+  const latitude = window.prompt(
+    'Enter latitude:'
+  )
+
+  const longitude = window.prompt(
+    'Enter longitude:'
+  )
+
+  if (
+    latitude === null ||
+    longitude === null
+  ) {
+    return
+  }
+
+  const lat = Number(latitude)
+  const lng = Number(longitude)
+
+  if (
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lng) ||
+    lat < -90 ||
+    lat > 90 ||
+    lng < -180 ||
+    lng > 180
+  ) {
+
+    error.value =
+      'Please enter valid latitude and longitude.'
+
+    return
+  }
+
+  selectedLocation.value = {
+    latitude: lat,
+    longitude: lng
+  }
+
+  error.value = ''
+}
+
+// ------------------------------------
+// SUBMIT
+// ------------------------------------
+
 const submitEmergency = async () => {
 
+  error.value = ''
+
   if (!selectedType.value) {
-    alert(
+
+    error.value =
       'Please select the type of help needed.'
-    )
+
     return
   }
 
   if (!description.value.trim()) {
-    alert(
+
+    error.value =
       'Please describe the situation.'
-    )
+
     return
   }
 
-  if (!props.location) {
-    alert(
-      'Please select a location on the map.'
-    )
+  if (!selectedLocation.value) {
+
+    error.value =
+      'Please select a location.'
+
     return
-  }
-
-  const emergency = {
-    type: selectedType.value,
-
-    priority: selectedPriority.value,
-
-    description:
-      description.value.trim(),
-
-    latitude:
-      props.location.latitude,
-
-    longitude:
-      props.location.longitude
   }
 
   try {
 
     submitting.value = true
 
-    console.log(
-      '🚨 Sending emergency:',
-      emergency
-    )
+    const emergency = {
+      type: selectedType.value,
+
+      priority: selectedPriority.value,
+
+      description:
+        description.value.trim(),
+
+      latitude:
+        selectedLocation.value.latitude,
+
+      longitude:
+        selectedLocation.value.longitude
+    }
 
     const response =
       await createEmergency(emergency)
 
     console.log(
-      '✅ Emergency created:',
+      '🚨 Emergency created:',
       response
     )
 
-    alert(
-      'Emergency reported successfully! 🚨'
-    )
-
-    // Reset form
-
-    selectedType.value = ''
-    selectedPriority.value = 'Low'
-    description.value = ''
-
     emit(
-      'submitted',
+      'created',
       response.emergency
     )
 
     emit('close')
 
-  } catch (error) {
+  } catch (err) {
 
     console.error(
-      '❌ Failed to submit emergency:',
-      error
+      '❌ Failed to create emergency:',
+      err
     )
 
-    const message =
-      error.response?.data?.message ||
-      'Failed to submit emergency. Please try again.'
-
-    alert(message)
+    error.value =
+      err.response?.data?.message ||
+      'Failed to submit emergency.'
 
   } finally {
 
@@ -141,13 +188,27 @@ const submitEmergency = async () => {
 
   }
 }
+
+// ------------------------------------
+// CLOSE
+// ------------------------------------
+
+const close = () => {
+
+  if (submitting.value) {
+    return
+  }
+
+  emit('close')
+}
+
 </script>
 
 <template>
 
   <div
     class="modal-overlay"
-    @click.self="$emit('close')"
+    @click.self="close"
   >
 
     <div class="report-modal">
@@ -170,12 +231,23 @@ const submitEmergency = async () => {
 
         <button
           class="close-button"
-          @click="$emit('close')"
+          @click="close"
         >
           ✕
         </button>
 
       </div>
+
+
+      <!-- ERROR -->
+
+      <div
+        v-if="error"
+        class="error-box"
+      >
+        ⚠️ {{ error }}
+      </div>
+
 
       <!-- HELP TYPE -->
 
@@ -188,29 +260,30 @@ const submitEmergency = async () => {
         <div class="help-grid">
 
           <button
-            v-for="help in helpTypes"
-            :key="help.name"
+            v-for="item in helpTypes"
+            :key="item.type"
             class="help-option"
             :class="{
               selected:
-                selectedType === help.name
+                selectedType === item.type
             }"
             @click="
-              selectHelpType(help.name)
+              selectHelpType(item.type)
             "
           >
 
             <span>
-              {{ help.icon }}
+              {{ item.icon }}
             </span>
 
-            {{ help.name }}
+            {{ item.type }}
 
           </button>
 
         </div>
 
       </div>
+
 
       <!-- PRIORITY -->
 
@@ -225,10 +298,10 @@ const submitEmergency = async () => {
           <label>
 
             <input
-              type="radio"
-              name="priority"
-              value="Low"
               v-model="selectedPriority"
+              type="radio"
+              value="Low"
+              name="priority"
             >
 
             Low
@@ -238,10 +311,10 @@ const submitEmergency = async () => {
           <label>
 
             <input
-              type="radio"
-              name="priority"
-              value="Medium"
               v-model="selectedPriority"
+              type="radio"
+              value="Medium"
+              name="priority"
             >
 
             Medium
@@ -251,10 +324,10 @@ const submitEmergency = async () => {
           <label>
 
             <input
-              type="radio"
-              name="priority"
-              value="Critical"
               v-model="selectedPriority"
+              type="radio"
+              value="Critical"
+              name="priority"
             >
 
             Critical
@@ -264,6 +337,7 @@ const submitEmergency = async () => {
         </div>
 
       </div>
+
 
       <!-- DESCRIPTION -->
 
@@ -282,37 +356,50 @@ const submitEmergency = async () => {
 
       </div>
 
+
       <!-- LOCATION -->
 
-      <div class="location-box">
+      <div class="form-section">
 
-        <template v-if="location">
+        <label>
+          Location
+        </label>
 
-          📍 Location selected
+        <button
+          class="location-selector"
+          @click="selectLocation"
+        >
 
-          <br>
+          <span>
+            📍
+          </span>
 
-          <small>
+          <span
+            v-if="selectedLocation"
+          >
 
             {{
-              location.latitude.toFixed(5)
+              selectedLocation.latitude.toFixed(5)
             }},
             {{
-              location.longitude.toFixed(5)
+              selectedLocation.longitude.toFixed(5)
             }}
 
-          </small>
+          </span>
 
-        </template>
+          <span v-else>
+            Select location
+          </span>
 
-        <template v-else>
+        </button>
 
-          📍 Click on the map to select
-          a location
-
-        </template>
+        <p class="location-hint">
+          For now, enter the coordinates of the
+          emergency location.
+        </p>
 
       </div>
+
 
       <!-- SUBMIT -->
 
@@ -346,7 +433,7 @@ const submitEmergency = async () => {
   inset: 0;
 
   background:
-    rgba(17, 24, 39, 0.35);
+    rgba(17, 24, 39, 0.45);
 
   display: flex;
 
@@ -354,14 +441,15 @@ const submitEmergency = async () => {
 
   justify-content: center;
 
-  z-index: 1000;
+  padding: 16px;
+
+  z-index: 5000;
 }
 
 .report-modal {
   width: 480px;
 
-  max-width:
-    calc(100% - 32px);
+  max-width: 100%;
 
   max-height: 90vh;
 
@@ -375,8 +463,9 @@ const submitEmergency = async () => {
 
   box-shadow:
     0 20px 50px
-    rgba(0, 0, 0, 0.15);
+    rgba(0, 0, 0, 0.2);
 }
+
 
 /* HEADER */
 
@@ -389,7 +478,7 @@ const submitEmergency = async () => {
   align-items:
     flex-start;
 
-  margin-bottom: 24px;
+  margin-bottom: 22px;
 }
 
 .modal-header h2 {
@@ -419,25 +508,41 @@ const submitEmergency = async () => {
 
   border-radius: 50%;
 
-  cursor: pointer;
-
   font-size: 14px;
 }
 
-.close-button:hover {
-  background: #e5e7eb;
+
+/* ERROR */
+
+.error-box {
+  margin-bottom: 18px;
+
+  padding: 10px 12px;
+
+  border-radius: 8px;
+
+  background: #fef2f2;
+
+  border: 1px solid #fecaca;
+
+  color: #dc2626;
+
+  font-size: 12px;
+
+  font-weight: 600;
 }
+
 
 /* FORM */
 
 .form-section {
-  margin-bottom: 22px;
+  margin-bottom: 20px;
 }
 
 .form-section > label {
   display: block;
 
-  margin-bottom: 10px;
+  margin-bottom: 9px;
 
   font-size: 14px;
 
@@ -446,7 +551,8 @@ const submitEmergency = async () => {
   color: #374151;
 }
 
-/* HELP GRID */
+
+/* HELP */
 
 .help-grid {
   display: grid;
@@ -454,34 +560,33 @@ const submitEmergency = async () => {
   grid-template-columns:
     repeat(2, 1fr);
 
-  gap: 10px;
+  gap: 9px;
 }
 
 .help-option {
-  border:
-    1px solid #e5e7eb;
+  border: 1px solid #e5e7eb;
 
   background: #fafafa;
 
-  padding: 14px;
+  padding: 13px;
 
-  border-radius: 10px;
+  border-radius: 9px;
 
   display: flex;
 
   align-items: center;
 
-  gap: 10px;
+  gap: 9px;
 
-  font-size: 14px;
+  font-size: 13px;
 
-  cursor: pointer;
+  color: #374151;
 
   transition: 0.2s;
 }
 
 .help-option span {
-  font-size: 20px;
+  font-size: 19px;
 }
 
 .help-option:hover {
@@ -497,30 +602,34 @@ const submitEmergency = async () => {
 
   color: #dc2626;
 
-  font-weight: 600;
+  font-weight: 700;
 }
+
 
 /* PRIORITY */
 
 .priority-options {
   display: flex;
 
-  gap: 20px;
+  gap: 18px;
+
+  flex-wrap: wrap;
 }
 
 .priority-options label {
-  font-size: 14px;
-
   display: flex;
 
   align-items: center;
 
   gap: 5px;
 
+  font-size: 13px;
+
   cursor: pointer;
 }
 
-/* TEXTAREA */
+
+/* DESCRIPTION */
 
 textarea {
   width: 100%;
@@ -532,11 +641,9 @@ textarea {
 
   border-radius: 9px;
 
-  padding: 12px;
+  padding: 11px;
 
-  font-family: inherit;
-
-  font-size: 14px;
+  font-size: 13px;
 
   outline: none;
 }
@@ -545,28 +652,46 @@ textarea:focus {
   border-color: #ef4444;
 }
 
+
 /* LOCATION */
 
-.location-box {
-  background: #f9fafb;
+.location-selector {
+  width: 100%;
 
   border:
-    1px solid #e5e7eb;
+    1px solid #d1d5db;
+
+  background: #f9fafb;
+
+  padding: 11px;
 
   border-radius: 9px;
 
-  padding: 12px;
+  display: flex;
+
+  align-items: center;
+
+  gap: 8px;
+
+  text-align: left;
+
+  color: #374151;
 
   font-size: 13px;
-
-  color: #6b7280;
-
-  margin-bottom: 18px;
 }
 
-.location-box small {
-  color: #374151;
+.location-selector:hover {
+  background: #f3f4f6;
 }
+
+.location-hint {
+  margin: 6px 0 0;
+
+  font-size: 10px;
+
+  color: #9ca3af;
+}
+
 
 /* SUBMIT */
 
@@ -585,9 +710,7 @@ textarea:focus {
 
   font-size: 14px;
 
-  font-weight: 600;
-
-  cursor: pointer;
+  font-weight: 700;
 
   transition: 0.2s;
 }
@@ -597,9 +720,24 @@ textarea:focus {
 }
 
 .submit-button:disabled {
-  background: #fca5a5;
+  opacity: 0.6;
 
   cursor: not-allowed;
+}
+
+
+/* MOBILE */
+
+@media (max-width: 500px) {
+
+  .report-modal {
+    padding: 18px;
+  }
+
+  .help-grid {
+    grid-template-columns: 1fr;
+  }
+
 }
 
 </style>
