@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { onMounted, onBeforeUnmount, ref, computed } from 'vue'
 import axios from 'axios'
 import DisasterMap from './components/DisasterMap.vue'
 
@@ -8,168 +8,205 @@ const showReportForm = ref(false)
 const selectedType = ref('')
 const selectedPriority = ref('Low')
 const description = ref('')
-
 const selectedLocation = ref(null)
 
-const errorMessage = ref('')
+const emergencies = ref([])
+
+let refreshInterval = null
+
+// ------------------------------------
+// REPORT FORM
+// ------------------------------------
 
 const openReportForm = () => {
-  errorMessage.value = ''
   showReportForm.value = true
 }
 
 const closeReportForm = () => {
   showReportForm.value = false
-  errorMessage.value = ''
-}
-
-const handleLocationSelected = (location) => {
-  selectedLocation.value = location
-
-  console.log('Location received by App.vue:', location)
 }
 
 const selectHelpType = (type) => {
   selectedType.value = type
-  errorMessage.value = ''
 }
+
+// ------------------------------------
+// MAP LOCATION
+// ------------------------------------
+
+const handleLocationSelected = (location) => {
+  selectedLocation.value = location
+
+  console.log(
+    '📍 Location received:',
+    location
+  )
+}
+
+// ------------------------------------
+// EMERGENCIES FROM MAP
+// ------------------------------------
+
+const handleEmergenciesUpdated = (data) => {
+  emergencies.value = data
+}
+
+// ------------------------------------
+// DASHBOARD COUNTS
+// ------------------------------------
+
+const totalEmergencies = computed(() => {
+  return emergencies.value.length
+})
+
+const pendingEmergencies = computed(() => {
+  return emergencies.value.filter(
+    emergency =>
+      emergency.status === 'pending'
+  ).length
+})
+
+const acceptedEmergencies = computed(() => {
+  return emergencies.value.filter(
+    emergency =>
+      emergency.status === 'accepted'
+  ).length
+})
+
+const resolvedEmergencies = computed(() => {
+  return emergencies.value.filter(
+    emergency =>
+      emergency.status === 'resolved'
+  ).length
+})
+
+const criticalEmergencies = computed(() => {
+  return emergencies.value.filter(
+    emergency =>
+      emergency.priority === 'Critical' &&
+      emergency.status !== 'resolved'
+  ).length
+})
+
+const activeVolunteers = computed(() => {
+
+  const volunteers =
+    emergencies.value
+      .filter(
+        emergency =>
+          emergency.status === 'accepted' &&
+          emergency.assignedVolunteer
+      )
+      .map(
+        emergency =>
+          emergency.assignedVolunteer
+      )
+
+  return new Set(volunteers).size
+})
+
+// ------------------------------------
+// SUBMIT EMERGENCY
+// ------------------------------------
 
 const submitEmergency = async () => {
 
   if (!selectedType.value) {
-    alert('Please select what kind of help is needed.')
-    return
-  }
-
-  if (!selectedLocation.value) {
-    alert('Please select a location on the map.')
+    alert(
+      'Please select the type of help needed.'
+    )
     return
   }
 
   if (!description.value.trim()) {
-    alert('Please describe the situation.')
+    alert(
+      'Please describe the situation.'
+    )
+    return
+  }
+
+  if (!selectedLocation.value) {
+    alert(
+      'Please select a location on the map.'
+    )
     return
   }
 
   const emergency = {
     type: selectedType.value,
     priority: selectedPriority.value,
-    description: description.value,
-    latitude: selectedLocation.value.latitude,
-    longitude: selectedLocation.value.longitude
+    description: description.value.trim(),
+    latitude:
+      selectedLocation.value.latitude,
+    longitude:
+      selectedLocation.value.longitude
   }
-
-  console.log('📤 Sending emergency to backend...')
-  console.log(emergency)
 
   try {
 
-    const response = await axios.post(
-      'http://localhost:3000/api/emergencies',
+    console.log(
+      '🚨 Sending emergency:',
       emergency
     )
 
-    console.log('✅ Backend response:')
-    console.log(response.data)
-
-    alert('Emergency reported successfully! 🚨')
-
-    // Close form
-    closeReportForm()
-
-    // Reset form
-    selectedType.value = ''
-    selectedPriority.value = 'Low'
-    description.value = ''
-
-  } catch (error) {
-
-    console.error('❌ Failed to submit emergency:')
-
-    if (error.response) {
-      console.error(error.response.data)
-    } else {
-      console.error(error.message)
-    }
-
-    alert('Failed to submit emergency. Please try again.')
-  }
-}
-const getStatusText = (status) => {
-
-  switch (status) {
-
-    case 'accepted':
-      return '🔵 Help is on the way'
-
-    case 'resolved':
-      return '✅ Resolved'
-
-    default:
-      return '🟡 Waiting for help'
-  }
-}
-const acceptEmergency = async (emergencyId) => {
-
-  try {
-
-    // Temporary volunteer identity
-    const volunteerId = 'volunteer-demo-001'
+    const response =
+      await axios.post(
+        'http://localhost:3000/api/emergencies',
+        emergency
+      )
 
     console.log(
-      '🙋 Accepting emergency:',
-      emergencyId
-    )
-
-    const response = await axios.patch(
-      `http://localhost:3000/api/emergencies/${emergencyId}/accept`,
-      {
-        volunteerId
-      }
-    )
-
-    console.log(
-      '✅ Emergency accepted:',
+      '✅ Emergency created:',
       response.data
     )
 
     alert(
-      'You are now helping with this emergency! 🙋'
+      'Emergency reported successfully! 🚨'
     )
 
-    // Reload markers
-    await loadEmergencies()
+    // Reset form
+
+    selectedType.value = ''
+    selectedPriority.value = 'Low'
+    description.value = ''
+    selectedLocation.value = null
+
+    closeReportForm()
 
   } catch (error) {
 
     console.error(
-      '❌ Failed to accept emergency:',
+      '❌ Failed to submit emergency:',
       error
     )
 
-    if (error.response) {
-
-      alert(
-        error.response.data.message ||
-        'This emergency is no longer available.'
-      )
-
-    } else {
-
-      alert(
-        'Could not connect to the server.'
-      )
-    }
+    alert(
+      'Failed to submit emergency. Please try again.'
+    )
   }
 }
-</script>
 
+// ------------------------------------
+// CLEANUP
+// ------------------------------------
+
+onBeforeUnmount(() => {
+
+  if (refreshInterval) {
+    clearInterval(refreshInterval)
+  }
+
+})
+
+</script>
 
 <template>
 
   <div class="app">
 
-    <!-- ==================== HEADER ==================== -->
+    <!-- ================================= -->
+    <!-- HEADER -->
+    <!-- ================================= -->
 
     <header class="topbar">
 
@@ -181,7 +218,9 @@ const acceptEmergency = async (emergencyId) => {
 
         <div>
 
-          <h1>AidMap</h1>
+          <h1>
+            AidMap
+          </h1>
 
           <p>
             Disaster response & community aid
@@ -190,7 +229,6 @@ const acceptEmergency = async (emergencyId) => {
         </div>
 
       </div>
-
 
       <button
         class="report-button"
@@ -201,19 +239,162 @@ const acceptEmergency = async (emergencyId) => {
 
     </header>
 
+    <!-- ================================= -->
+    <!-- DASHBOARD -->
+    <!-- ================================= -->
 
-    <!-- ==================== MAP ==================== -->
+    <section class="dashboard">
+
+      <!-- TOTAL -->
+
+      <div class="stat-card">
+
+        <div class="stat-icon total">
+          🚨
+        </div>
+
+        <div>
+
+          <p>
+            Total Emergencies
+          </p>
+
+          <h2>
+            {{ totalEmergencies }}
+          </h2>
+
+        </div>
+
+      </div>
+
+      <!-- PENDING -->
+
+      <div class="stat-card">
+
+        <div class="stat-icon pending">
+          🟡
+        </div>
+
+        <div>
+
+          <p>
+            Waiting for Help
+          </p>
+
+          <h2>
+            {{ pendingEmergencies }}
+          </h2>
+
+        </div>
+
+      </div>
+
+      <!-- ACCEPTED -->
+
+      <div class="stat-card">
+
+        <div class="stat-icon accepted">
+          🙋
+        </div>
+
+        <div>
+
+          <p>
+            Being Helped
+          </p>
+
+          <h2>
+            {{ acceptedEmergencies }}
+          </h2>
+
+        </div>
+
+      </div>
+
+      <!-- RESOLVED -->
+
+      <div class="stat-card">
+
+        <div class="stat-icon resolved">
+          ✅
+        </div>
+
+        <div>
+
+          <p>
+            Resolved
+          </p>
+
+          <h2>
+            {{ resolvedEmergencies }}
+          </h2>
+
+        </div>
+
+      </div>
+
+      <!-- CRITICAL -->
+
+      <div class="stat-card critical-card">
+
+        <div class="stat-icon critical">
+          🔴
+        </div>
+
+        <div>
+
+          <p>
+            Critical Active
+          </p>
+
+          <h2>
+            {{ criticalEmergencies }}
+          </h2>
+
+        </div>
+
+      </div>
+
+      <!-- VOLUNTEERS -->
+
+      <div class="stat-card">
+
+        <div class="stat-icon volunteer">
+          🤝
+        </div>
+
+        <div>
+
+          <p>
+            Active Volunteers
+          </p>
+
+          <h2>
+            {{ activeVolunteers }}
+          </h2>
+
+        </div>
+
+      </div>
+
+    </section>
+
+    <!-- ================================= -->
+    <!-- MAP -->
+    <!-- ================================= -->
 
     <main class="map-container">
 
       <DisasterMap
         @location-selected="handleLocationSelected"
+        @emergencies-updated="handleEmergenciesUpdated"
       />
 
     </main>
 
-
-    <!-- ==================== EMERGENCY MODAL ==================== -->
+    <!-- ================================= -->
+    <!-- REPORT MODAL -->
+    <!-- ================================= -->
 
     <div
       v-if="showReportForm"
@@ -223,8 +404,7 @@ const acceptEmergency = async (emergencyId) => {
 
       <div class="report-modal">
 
-
-        <!-- ==================== MODAL HEADER ==================== -->
+        <!-- HEADER -->
 
         <div class="modal-header">
 
@@ -240,7 +420,6 @@ const acceptEmergency = async (emergencyId) => {
 
           </div>
 
-
           <button
             class="close-button"
             @click="closeReportForm"
@@ -250,8 +429,7 @@ const acceptEmergency = async (emergencyId) => {
 
         </div>
 
-
-        <!-- ==================== HELP TYPE ==================== -->
+        <!-- HELP TYPE -->
 
         <div class="form-section">
 
@@ -259,129 +437,97 @@ const acceptEmergency = async (emergencyId) => {
             What kind of help is needed?
           </label>
 
-
           <div class="help-grid">
 
-
-            <!-- WATER -->
-
             <button
               class="help-option"
               :class="{
-                selected: selectedType === 'Water'
+                selected:
+                  selectedType === 'Water'
               }"
-              @click="selectHelpType('Water')"
+              @click="
+                selectHelpType('Water')
+              "
             >
-
-              <span>
-                💧
-              </span>
-
+              <span>💧</span>
               Water
-
             </button>
-
-
-            <!-- MEDICAL -->
 
             <button
               class="help-option"
               :class="{
-                selected: selectedType === 'Medical'
+                selected:
+                  selectedType === 'Medical'
               }"
-              @click="selectHelpType('Medical')"
+              @click="
+                selectHelpType('Medical')
+              "
             >
-
-              <span>
-                🏥
-              </span>
-
+              <span>🏥</span>
               Medical
-
             </button>
-
-
-            <!-- FOOD -->
 
             <button
               class="help-option"
               :class="{
-                selected: selectedType === 'Food'
+                selected:
+                  selectedType === 'Food'
               }"
-              @click="selectHelpType('Food')"
+              @click="
+                selectHelpType('Food')
+              "
             >
-
-              <span>
-                🍱
-              </span>
-
+              <span>🍱</span>
               Food
-
             </button>
-
-
-            <!-- RESCUE -->
 
             <button
               class="help-option"
               :class="{
-                selected: selectedType === 'Rescue'
+                selected:
+                  selectedType === 'Rescue'
               }"
-              @click="selectHelpType('Rescue')"
+              @click="
+                selectHelpType('Rescue')
+              "
             >
-
-              <span>
-                🛟
-              </span>
-
+              <span>🛟</span>
               Rescue
-
             </button>
-
-
-            <!-- SHELTER -->
 
             <button
               class="help-option"
               :class="{
-                selected: selectedType === 'Shelter'
+                selected:
+                  selectedType === 'Shelter'
               }"
-              @click="selectHelpType('Shelter')"
+              @click="
+                selectHelpType('Shelter')
+              "
             >
-
-              <span>
-                🏠
-              </span>
-
+              <span>🏠</span>
               Shelter
-
             </button>
-
-
-            <!-- POWER -->
 
             <button
               class="help-option"
               :class="{
-                selected: selectedType === 'Power'
+                selected:
+                  selectedType === 'Power'
               }"
-              @click="selectHelpType('Power')"
+              @click="
+                selectHelpType('Power')
+              "
             >
-
-              <span>
-                ⚡
-              </span>
-
+              <span>⚡</span>
               Power
-
             </button>
 
           </div>
 
         </div>
 
-
-        <!-- ==================== PRIORITY ==================== -->
+        <!-- PRIORITY -->
 
         <div class="form-section">
 
@@ -389,9 +535,7 @@ const acceptEmergency = async (emergencyId) => {
             Priority
           </label>
 
-
           <div class="priority-options">
-
 
             <label>
 
@@ -406,7 +550,6 @@ const acceptEmergency = async (emergencyId) => {
 
             </label>
 
-
             <label>
 
               <input
@@ -419,7 +562,6 @@ const acceptEmergency = async (emergencyId) => {
               Medium
 
             </label>
-
 
             <label>
 
@@ -438,15 +580,13 @@ const acceptEmergency = async (emergencyId) => {
 
         </div>
 
-
-        <!-- ==================== DESCRIPTION ==================== -->
+        <!-- DESCRIPTION -->
 
         <div class="form-section">
 
           <label for="description">
             Describe the situation
           </label>
-
 
           <textarea
             id="description"
@@ -457,66 +597,47 @@ const acceptEmergency = async (emergencyId) => {
 
         </div>
 
-
-        <!-- ==================== LOCATION ==================== -->
+        <!-- LOCATION -->
 
         <div class="location-box">
 
+          <template
+            v-if="selectedLocation"
+          >
 
-          <template v-if="selectedLocation">
-
-            📍
-
-            <strong>
-              Location selected
-            </strong>
+            📍 Location selected
 
             <br>
 
-            <span>
+            <small>
 
-              {{ selectedLocation.latitude.toFixed(5) }},
+              {{
+                selectedLocation.latitude.toFixed(5)
+              }},
+              {{
+                selectedLocation.longitude.toFixed(5)
+              }}
 
-              {{ selectedLocation.longitude.toFixed(5) }}
-
-            </span>
+            </small>
 
           </template>
-
 
           <template v-else>
 
-            📍 Click on the map to select a location
+            📍 Click on the map to select
+            a location
 
           </template>
 
-
         </div>
 
-
-        <!-- ==================== ERROR ==================== -->
-
-        <div
-          v-if="errorMessage"
-          class="error-message"
-        >
-
-          ⚠️
-
-          {{ errorMessage }}
-
-        </div>
-
-
-        <!-- ==================== SUBMIT ==================== -->
+        <!-- SUBMIT -->
 
         <button
           class="submit-button"
           @click="submitEmergency"
         >
-
-          Submit Emergency
-
+          🚨 Submit Emergency
         </button>
 
       </div>
@@ -527,58 +648,48 @@ const acceptEmergency = async (emergencyId) => {
 
 </template>
 
-
 <style>
-
-/* ==================== GLOBAL ==================== */
 
 * {
   box-sizing: border-box;
 }
 
-
 body {
   margin: 0;
-
   font-family:
     Inter,
     Arial,
     sans-serif;
 
   background: #f7f8fa;
-
   color: #1f2937;
 }
-
 
 button {
   font-family: inherit;
 }
 
-
-/* ==================== APP ==================== */
-
 .app {
   width: 100%;
-
   height: 100vh;
 
   display: flex;
-
   flex-direction: column;
 
   overflow: hidden;
 }
 
-
-/* ==================== HEADER ==================== */
+/* ================================= */
+/* HEADER */
+/* ================================= */
 
 .topbar {
   height: 72px;
 
   background: white;
 
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom:
+    1px solid #e5e7eb;
 
   display: flex;
 
@@ -591,7 +702,6 @@ button {
   z-index: 10;
 }
 
-
 .brand {
   display: flex;
 
@@ -600,11 +710,9 @@ button {
   gap: 12px;
 }
 
-
 .brand-icon {
   font-size: 25px;
 }
-
 
 .brand h1 {
   margin: 0;
@@ -616,7 +724,6 @@ button {
   color: #111827;
 }
 
-
 .brand p {
   margin: 2px 0 0;
 
@@ -624,9 +731,6 @@ button {
 
   color: #6b7280;
 }
-
-
-/* ==================== REPORT BUTTON ==================== */
 
 .report-button {
   border: none;
@@ -648,29 +752,138 @@ button {
   transition: 0.2s;
 }
 
-
 .report-button:hover {
   background: #dc2626;
 }
 
+/* ================================= */
+/* DASHBOARD */
+/* ================================= */
 
-/* ==================== MAP ==================== */
+.dashboard {
+  background: #f8fafc;
+
+  padding: 12px 20px;
+
+  display: grid;
+
+  grid-template-columns:
+    repeat(6, 1fr);
+
+  gap: 12px;
+
+  border-bottom:
+    1px solid #e5e7eb;
+
+  z-index: 5;
+}
+
+.stat-card {
+  background: white;
+
+  border:
+    1px solid #e5e7eb;
+
+  border-radius: 12px;
+
+  padding: 12px;
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 10px;
+
+  min-width: 0;
+}
+
+.stat-icon {
+  width: 38px;
+
+  height: 38px;
+
+  flex-shrink: 0;
+
+  border-radius: 10px;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: center;
+
+  font-size: 18px;
+}
+
+.stat-icon.total {
+  background: #fee2e2;
+}
+
+.stat-icon.pending {
+  background: #fef3c7;
+}
+
+.stat-icon.accepted {
+  background: #dbeafe;
+}
+
+.stat-icon.resolved {
+  background: #dcfce7;
+}
+
+.stat-icon.critical {
+  background: #fee2e2;
+}
+
+.stat-icon.volunteer {
+  background: #ede9fe;
+}
+
+.stat-card p {
+  margin: 0;
+
+  font-size: 11px;
+
+  color: #6b7280;
+
+  white-space: nowrap;
+}
+
+.stat-card h2 {
+  margin: 2px 0 0;
+
+  font-size: 20px;
+
+  color: #111827;
+}
+
+.critical-card {
+  border-color: #fecaca;
+}
+
+/* ================================= */
+/* MAP */
+/* ================================= */
 
 .map-container {
   flex: 1;
 
   position: relative;
+
+  min-height: 0;
 }
 
-
-/* ==================== MODAL OVERLAY ==================== */
+/* ================================= */
+/* MODAL */
+/* ================================= */
 
 .modal-overlay {
   position: fixed;
 
   inset: 0;
 
-  background: rgba(17, 24, 39, 0.35);
+  background:
+    rgba(17, 24, 39, 0.35);
 
   display: flex;
 
@@ -681,13 +894,11 @@ button {
   z-index: 1000;
 }
 
-
-/* ==================== MODAL ==================== */
-
 .report-modal {
   width: 480px;
 
-  max-width: calc(100% - 32px);
+  max-width:
+    calc(100% - 32px);
 
   max-height: 90vh;
 
@@ -704,19 +915,21 @@ button {
     rgba(0, 0, 0, 0.15);
 }
 
-
-/* ==================== MODAL HEADER ==================== */
+/* ================================= */
+/* MODAL HEADER */
+/* ================================= */
 
 .modal-header {
   display: flex;
 
-  justify-content: space-between;
+  justify-content:
+    space-between;
 
-  align-items: flex-start;
+  align-items:
+    flex-start;
 
   margin-bottom: 24px;
 }
-
 
 .modal-header h2 {
   margin: 0;
@@ -726,7 +939,6 @@ button {
   color: #111827;
 }
 
-
 .modal-header p {
   margin: 5px 0 0;
 
@@ -734,7 +946,6 @@ button {
 
   color: #6b7280;
 }
-
 
 .close-button {
   border: none;
@@ -748,22 +959,15 @@ button {
   border-radius: 50%;
 
   cursor: pointer;
-
-  font-size: 14px;
 }
 
-
-.close-button:hover {
-  background: #e5e7eb;
-}
-
-
-/* ==================== FORM ==================== */
+/* ================================= */
+/* FORM */
+/* ================================= */
 
 .form-section {
   margin-bottom: 22px;
 }
-
 
 .form-section > label {
   display: block;
@@ -777,20 +981,22 @@ button {
   color: #374151;
 }
 
-
-/* ==================== HELP GRID ==================== */
+/* ================================= */
+/* HELP GRID */
+/* ================================= */
 
 .help-grid {
   display: grid;
 
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns:
+    repeat(2, 1fr);
 
   gap: 10px;
 }
 
-
 .help-option {
-  border: 1px solid #e5e7eb;
+  border:
+    1px solid #e5e7eb;
 
   background: #fafafa;
 
@@ -811,11 +1017,9 @@ button {
   transition: 0.2s;
 }
 
-
 .help-option span {
   font-size: 20px;
 }
-
 
 .help-option:hover {
   border-color: #ef4444;
@@ -823,25 +1027,25 @@ button {
   background: #fff5f5;
 }
 
-
 .help-option.selected {
   border-color: #ef4444;
 
   background: #fff1f2;
 
-  box-shadow:
-    0 0 0 1px #ef4444;
+  color: #dc2626;
+
+  font-weight: 600;
 }
 
-
-/* ==================== PRIORITY ==================== */
+/* ================================= */
+/* PRIORITY */
+/* ================================= */
 
 .priority-options {
   display: flex;
 
   gap: 20px;
 }
-
 
 .priority-options label {
   font-size: 14px;
@@ -855,20 +1059,17 @@ button {
   cursor: pointer;
 }
 
-
-.priority-options input {
-  accent-color: #ef4444;
-}
-
-
-/* ==================== TEXTAREA ==================== */
+/* ================================= */
+/* TEXTAREA */
+/* ================================= */
 
 textarea {
   width: 100%;
 
   resize: vertical;
 
-  border: 1px solid #d1d5db;
+  border:
+    1px solid #d1d5db;
 
   border-radius: 9px;
 
@@ -881,22 +1082,19 @@ textarea {
   outline: none;
 }
 
-
 textarea:focus {
   border-color: #ef4444;
-
-  box-shadow:
-    0 0 0 2px
-    rgba(239, 68, 68, 0.1);
 }
 
-
-/* ==================== LOCATION ==================== */
+/* ================================= */
+/* LOCATION */
+/* ================================= */
 
 .location-box {
   background: #f9fafb;
 
-  border: 1px solid #e5e7eb;
+  border:
+    1px solid #e5e7eb;
 
   border-radius: 9px;
 
@@ -906,44 +1104,16 @@ textarea:focus {
 
   color: #6b7280;
 
-  margin-bottom: 12px;
+  margin-bottom: 18px;
 }
 
-
-.location-box strong {
+.location-box small {
   color: #374151;
 }
 
-
-.location-box span {
-  margin-left: 20px;
-
-  color: #6b7280;
-}
-
-
-/* ==================== ERROR ==================== */
-
-.error-message {
-  background: #fff1f2;
-
-  border: 1px solid #fecdd3;
-
-  color: #be123c;
-
-  border-radius: 9px;
-
-  padding: 11px 12px;
-
-  margin-bottom: 12px;
-
-  font-size: 13px;
-
-  line-height: 1.4;
-}
-
-
-/* ==================== SUBMIT ==================== */
+/* ================================= */
+/* SUBMIT */
+/* ================================= */
 
 .submit-button {
   width: 100%;
@@ -967,32 +1137,32 @@ textarea:focus {
   transition: 0.2s;
 }
 
-
 .submit-button:hover {
   background: #dc2626;
 }
 
+/* ================================= */
+/* RESPONSIVE */
+/* ================================= */
 
-/* ==================== MOBILE ==================== */
+@media (max-width: 1000px) {
+
+  .dashboard {
+    grid-template-columns:
+      repeat(3, 1fr);
+  }
+
+}
 
 @media (max-width: 600px) {
 
   .topbar {
-    height: 64px;
-
-    padding: 0 16px;
+    padding: 0 15px;
   }
-
 
   .brand p {
     display: none;
   }
-
-
-  .brand h1 {
-    font-size: 18px;
-  }
-
 
   .report-button {
     padding: 9px 12px;
@@ -1000,25 +1170,19 @@ textarea:focus {
     font-size: 12px;
   }
 
+  .dashboard {
+    grid-template-columns:
+      repeat(2, 1fr);
 
-  .report-modal {
-    width: 100%;
-
-    max-width: calc(100% - 20px);
-
-    padding: 20px;
+    padding: 10px;
   }
 
-
-  .help-grid {
-    grid-template-columns: 1fr 1fr;
+  .stat-card {
+    padding: 10px;
   }
 
-
-  .priority-options {
-    gap: 12px;
-
-    flex-wrap: wrap;
+  .stat-card p {
+    font-size: 10px;
   }
 
 }

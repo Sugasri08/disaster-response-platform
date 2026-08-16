@@ -1,32 +1,9 @@
 const express = require('express')
 const mongoose = require('mongoose')
 const cors = require('cors')
-const http = require('http')
-const { Server } = require('socket.io')
 require('dotenv').config()
 
 const app = express()
-
-// ------------------------------------
-// HTTP SERVER
-// ------------------------------------
-
-const server = http.createServer(app)
-
-// ------------------------------------
-// SOCKET.IO
-// ------------------------------------
-
-const io = new Server(server, {
-  cors: {
-    origin: '*',
-    methods: ['GET', 'POST', 'PATCH']
-  }
-})
-
-// ------------------------------------
-// MIDDLEWARE
-// ------------------------------------
 
 app.use(cors())
 app.use(express.json())
@@ -72,16 +49,6 @@ const emergencySchema = new mongoose.Schema(
     assignedVolunteer: {
       type: String,
       default: null
-    },
-
-    acceptedAt: {
-      type: Date,
-      default: null
-    },
-
-    resolvedAt: {
-      type: Date,
-      default: null
     }
   },
   {
@@ -104,42 +71,17 @@ mongoose
     console.log('✅ MongoDB connected')
   })
   .catch((error) => {
-    console.error(
-      '❌ MongoDB connection failed:'
-    )
-
+    console.error('❌ MongoDB connection failed:')
     console.error(error.message)
   })
-
-// ------------------------------------
-// SOCKET CONNECTION
-// ------------------------------------
-
-io.on('connection', (socket) => {
-
-  console.log(
-    '🟢 User connected:',
-    socket.id
-  )
-
-  socket.on('disconnect', () => {
-
-    console.log(
-      '🔴 User disconnected:',
-      socket.id
-    )
-  })
-})
 
 // ------------------------------------
 // HEALTH CHECK
 // ------------------------------------
 
 app.get('/', (req, res) => {
-
   res.json({
-    message:
-      'AidMap backend is running 🚨'
+    message: 'AidMap backend is running 🚨'
   })
 })
 
@@ -147,90 +89,61 @@ app.get('/', (req, res) => {
 // CREATE EMERGENCY
 // ------------------------------------
 
-app.post(
-  '/api/emergencies',
-  async (req, res) => {
+app.post('/api/emergencies', async (req, res) => {
+  try {
+    const emergency = new Emergency(req.body)
 
-    try {
+    const savedEmergency = await emergency.save()
 
-      const emergency =
-        new Emergency(req.body)
+    console.log(
+      '🚨 New emergency:',
+      savedEmergency._id
+    )
 
-      const savedEmergency =
-        await emergency.save()
+    res.status(201).json({
+      success: true,
+      emergency: savedEmergency
+    })
 
-      console.log(
-        '🚨 New emergency:',
-        savedEmergency._id
-      )
+  } catch (error) {
+    console.error('❌ Error saving emergency:')
+    console.error(error)
 
-      // Tell every connected map
-      io.emit(
-        'emergency-created',
-        savedEmergency
-      )
-
-      res.status(201).json({
-        success: true,
-        emergency: savedEmergency
-      })
-
-    } catch (error) {
-
-      console.error(
-        '❌ Error saving emergency:',
-        error
-      )
-
-      res.status(500).json({
-        success: false,
-        message:
-          'Failed to save emergency'
-      })
-    }
+    res.status(500).json({
+      success: false,
+      message: 'Failed to save emergency'
+    })
   }
-)
+})
 
 // ------------------------------------
 // GET ALL EMERGENCIES
 // ------------------------------------
 
-app.get(
-  '/api/emergencies',
-  async (req, res) => {
+app.get('/api/emergencies', async (req, res) => {
+  try {
+    const emergencies = await Emergency.find()
+      .sort({ createdAt: -1 })
 
-    try {
+    res.json({
+      success: true,
+      count: emergencies.length,
+      emergencies
+    })
 
-      const emergencies =
-        await Emergency.find()
-          .sort({
-            createdAt: -1
-          })
+  } catch (error) {
+    console.error('❌ Error fetching emergencies:')
+    console.error(error)
 
-      res.json({
-        success: true,
-        count: emergencies.length,
-        emergencies
-      })
-
-    } catch (error) {
-
-      console.error(
-        '❌ Error fetching emergencies:',
-        error
-      )
-
-      res.status(500).json({
-        success: false,
-        message:
-          'Failed to fetch emergencies'
-      })
-    }
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch emergencies'
+    })
   }
-)
+})
 
 // ------------------------------------
-// VOLUNTEER ACCEPTS EMERGENCY
+// ACCEPT EMERGENCY
 // ------------------------------------
 
 app.patch(
@@ -240,19 +153,29 @@ app.patch(
     try {
 
       const { id } = req.params
+      const { volunteerId } = req.body
 
-      const { volunteerId } =
-        req.body
+      console.log('🙋 Accept request received')
+      console.log('Emergency ID:', id)
+      console.log('Volunteer ID:', volunteerId)
 
+      // Check volunteer ID
       if (!volunteerId) {
-
         return res.status(400).json({
           success: false,
-          message:
-            'Volunteer ID is required'
+          message: 'Volunteer ID is required'
         })
       }
 
+      // Check MongoDB ID
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid emergency ID'
+        })
+      }
+
+      // Only accept pending emergencies
       const emergency =
         await Emergency.findOneAndUpdate(
           {
@@ -260,56 +183,54 @@ app.patch(
             status: 'pending'
           },
           {
-            status: 'accepted',
-            assignedVolunteer:
-              volunteerId,
-            acceptedAt: new Date()
+            $set: {
+              status: 'accepted',
+              assignedVolunteer: volunteerId
+            }
           },
           {
             new: true
           }
         )
 
+      // Emergency was already accepted/resolved
       if (!emergency) {
 
         return res.status(409).json({
           success: false,
           message:
-            'This emergency has already been accepted or resolved'
+            'Emergency not found or has already been accepted'
         })
       }
 
       console.log(
         '🙋 Emergency accepted:',
-        emergency._id,
-        'by',
-        volunteerId
+        emergency._id.toString()
       )
 
-      // Tell every connected map
-      io.emit(
-        'emergency-updated',
-        emergency
+      console.log(
+        '👤 Volunteer:',
+        volunteerId
       )
 
       res.json({
         success: true,
-        message:
-          'Emergency accepted successfully',
+        message: 'Emergency accepted successfully',
         emergency
       })
 
     } catch (error) {
 
       console.error(
-        '❌ Error accepting emergency:',
-        error
+        '❌ Error accepting emergency:'
       )
+
+      console.error(error)
 
       res.status(500).json({
         success: false,
-        message:
-          'Failed to accept emergency'
+        message: 'Failed to accept emergency',
+        error: error.message
       })
     }
   }
@@ -327,15 +248,20 @@ app.patch(
 
       const { id } = req.params
 
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid emergency ID'
+        })
+      }
+
       const emergency =
-        await Emergency.findOneAndUpdate(
+        await Emergency.findByIdAndUpdate(
+          id,
           {
-            _id: id,
-            status: 'accepted'
-          },
-          {
-            status: 'resolved',
-            resolvedAt: new Date()
+            $set: {
+              status: 'resolved'
+            }
           },
           {
             new: true
@@ -344,42 +270,35 @@ app.patch(
 
       if (!emergency) {
 
-        return res.status(409).json({
+        return res.status(404).json({
           success: false,
-          message:
-            'Emergency must be accepted before it can be resolved'
+          message: 'Emergency not found'
         })
       }
 
       console.log(
         '✅ Emergency resolved:',
-        emergency._id
-      )
-
-      // Tell every connected map
-      io.emit(
-        'emergency-updated',
-        emergency
+        emergency._id.toString()
       )
 
       res.json({
         success: true,
-        message:
-          'Emergency resolved successfully',
+        message: 'Emergency resolved successfully',
         emergency
       })
 
     } catch (error) {
 
       console.error(
-        '❌ Error resolving emergency:',
-        error
+        '❌ Error resolving emergency:'
       )
+
+      console.error(error)
 
       res.status(500).json({
         success: false,
-        message:
-          'Failed to resolve emergency'
+        message: 'Failed to resolve emergency',
+        error: error.message
       })
     }
   }
@@ -389,19 +308,10 @@ app.patch(
 // START SERVER
 // ------------------------------------
 
-const PORT =
-  process.env.PORT || 3000
+const PORT = process.env.PORT || 3000
 
-server.listen(
-  PORT,
-  () => {
-
-    console.log(
-      `🚀 AidMap backend running on http://localhost:${PORT}`
-    )
-
-    console.log(
-      '⚡ Socket.IO realtime updates enabled'
-    )
-  }
-)
+app.listen(PORT, () => {
+  console.log(
+    `🚀 AidMap backend running on http://localhost:${PORT}`
+  )
+})
