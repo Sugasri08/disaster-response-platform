@@ -1,5 +1,6 @@
 <script setup>
 import { ref } from 'vue'
+import axios from 'axios'
 import DisasterMap from './components/DisasterMap.vue'
 
 const showReportForm = ref(false)
@@ -33,53 +34,133 @@ const selectHelpType = (type) => {
   errorMessage.value = ''
 }
 
-const submitEmergency = () => {
-  errorMessage.value = ''
+const submitEmergency = async () => {
 
-  // Check help type
   if (!selectedType.value) {
-    errorMessage.value =
-      'Please select what kind of help is needed.'
+    alert('Please select what kind of help is needed.')
     return
   }
 
-  // Check description
-  if (!description.value.trim()) {
-    errorMessage.value =
-      'Please describe the situation.'
-    return
-  }
-
-  // Check location
   if (!selectedLocation.value) {
-    errorMessage.value =
-      'Please click on the map to select the emergency location.'
+    alert('Please select a location on the map.')
     return
   }
 
-  // Create emergency object
+  if (!description.value.trim()) {
+    alert('Please describe the situation.')
+    return
+  }
+
   const emergency = {
     type: selectedType.value,
     priority: selectedPriority.value,
-    description: description.value.trim(),
+    description: description.value,
     latitude: selectedLocation.value.latitude,
     longitude: selectedLocation.value.longitude
   }
 
-  console.log('🚨 Emergency submitted:')
-  console.table(emergency)
+  console.log('📤 Sending emergency to backend...')
+  console.log(emergency)
 
-  // Temporary success message
-  alert('🚨 Emergency reported successfully!')
+  try {
 
-  // Close modal
-  closeReportForm()
+    const response = await axios.post(
+      'http://localhost:3000/api/emergencies',
+      emergency
+    )
 
-  // Reset form
-  selectedType.value = ''
-  selectedPriority.value = 'Low'
-  description.value = ''
-  selectedLocation.value = null
+    console.log('✅ Backend response:')
+    console.log(response.data)
+
+    alert('Emergency reported successfully! 🚨')
+
+    // Close form
+    closeReportForm()
+
+    // Reset form
+    selectedType.value = ''
+    selectedPriority.value = 'Low'
+    description.value = ''
+
+  } catch (error) {
+
+    console.error('❌ Failed to submit emergency:')
+
+    if (error.response) {
+      console.error(error.response.data)
+    } else {
+      console.error(error.message)
+    }
+
+    alert('Failed to submit emergency. Please try again.')
+  }
+}
+const getStatusText = (status) => {
+
+  switch (status) {
+
+    case 'accepted':
+      return '🔵 Help is on the way'
+
+    case 'resolved':
+      return '✅ Resolved'
+
+    default:
+      return '🟡 Waiting for help'
+  }
+}
+const acceptEmergency = async (emergencyId) => {
+
+  try {
+
+    // Temporary volunteer identity
+    const volunteerId = 'volunteer-demo-001'
+
+    console.log(
+      '🙋 Accepting emergency:',
+      emergencyId
+    )
+
+    const response = await axios.patch(
+      `http://localhost:3000/api/emergencies/${emergencyId}/accept`,
+      {
+        volunteerId
+      }
+    )
+
+    console.log(
+      '✅ Emergency accepted:',
+      response.data
+    )
+
+    alert(
+      'You are now helping with this emergency! 🙋'
+    )
+
+    // Reload markers
+    await loadEmergencies()
+
+  } catch (error) {
+
+    console.error(
+      '❌ Failed to accept emergency:',
+      error
+    )
+
+    if (error.response) {
+
+      alert(
+        error.response.data.message ||
+        'This emergency is no longer available.'
+      )
+
+    } else {
+
+      alert(
+        'Could not connect to the server.'
+      )
+    }
+  }
 }
 </script>
 
