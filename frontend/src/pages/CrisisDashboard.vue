@@ -20,6 +20,8 @@ import {
 import { db } from '../firebase/firebase'
 
 import NearbyHelp from '../components/NearbyHelp.vue'
+
+
 /* =========================================================
    LEAFLET ICON FIX
 ========================================================= */
@@ -37,6 +39,7 @@ L.Icon.Default.mergeOptions({
     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png'
 })
 
+
 /* =========================================================
    PROPS
 ========================================================= */
@@ -53,6 +56,7 @@ const props = defineProps({
   }
 })
 
+
 /* =========================================================
    EVENTS
 ========================================================= */
@@ -62,6 +66,7 @@ const emit = defineEmits([
   'emergencies-updated',
   'accept-emergency'
 ])
+
 
 /* =========================================================
    MAP
@@ -73,6 +78,7 @@ let map = null
 let selectedMarker = null
 let emergencyLayer = null
 let unsubscribeEmergencies = null
+
 
 /* =========================================================
    STATE
@@ -95,22 +101,27 @@ const loadingEmergencies = ref(true)
 
 const updatingEmergency = ref(false)
 
+
 /* =========================================================
-   COMPUTED-LIKE FILTERING
+   FILTER EMERGENCIES
 ========================================================= */
 
 const filteredEmergencies = () => {
   let result = [...emergencyData.value]
 
+  /* STATUS FILTER */
+
   if (activeFilter.value !== 'all') {
-    result = result.filter(
-      emergency =>
-        String(
-          emergency.status || 'pending'
-        ).toLowerCase() ===
-        activeFilter.value
-    )
+    result = result.filter(emergency => {
+      const status = String(
+        emergency.status || 'pending'
+      ).toLowerCase()
+
+      return status === activeFilter.value
+    })
   }
+
+  /* SEARCH */
 
   if (searchText.value.trim()) {
     const search =
@@ -118,48 +129,61 @@ const filteredEmergencies = () => {
         .trim()
         .toLowerCase()
 
-    result = result.filter(
-      emergency =>
+    result = result.filter(emergency => {
+      const type =
         String(
           emergency.type || ''
-        )
-          .toLowerCase()
-          .includes(search) ||
+        ).toLowerCase()
 
+      const description =
         String(
           emergency.description || ''
-        )
-          .toLowerCase()
-          .includes(search) ||
+        ).toLowerCase()
 
+      const priority =
         String(
-          emergency.priority || ''
-        )
-          .toLowerCase()
-          .includes(search)
-    )
+          emergency.priority ||
+          emergency.severity ||
+          ''
+        ).toLowerCase()
+
+      return (
+        type.includes(search) ||
+        description.includes(search) ||
+        priority.includes(search)
+      )
+    })
   }
 
   return result
 }
 
+
 /* =========================================================
    STATS
 ========================================================= */
 
-const totalEmergencies = () =>
-  emergencyData.value.length
+const totalEmergencies = () => {
+  return emergencyData.value.length
+}
 
-const pendingEmergencies = () =>
-  emergencyData.value.filter(
-    emergency =>
-      String(
-        emergency.status || 'pending'
-      ).toLowerCase() === 'pending'
+
+const pendingEmergencies = () => {
+  return emergencyData.value.filter(
+    emergency => {
+      const status =
+        String(
+          emergency.status || 'pending'
+        ).toLowerCase()
+
+      return status === 'pending'
+    }
   ).length
+}
 
-const activeEmergencies = () =>
-  emergencyData.value.filter(
+
+const activeEmergencies = () => {
+  return emergencyData.value.filter(
     emergency => {
       const status =
         String(
@@ -173,14 +197,22 @@ const activeEmergencies = () =>
       )
     }
   ).length
+}
 
-const resolvedEmergencies = () =>
-  emergencyData.value.filter(
-    emergency =>
-      String(
-        emergency.status || ''
-      ).toLowerCase() === 'resolved'
+
+const resolvedEmergencies = () => {
+  return emergencyData.value.filter(
+    emergency => {
+      const status =
+        String(
+          emergency.status || ''
+        ).toLowerCase()
+
+      return status === 'resolved'
+    }
   ).length
+}
+
 
 /* =========================================================
    INITIALIZE MAP
@@ -227,11 +259,13 @@ const initializeMap = () => {
   }, 1000)
 }
 
+
 /* =========================================================
    FIRESTORE REAL-TIME LISTENER
 ========================================================= */
 
 const subscribeToEmergencies = () => {
+
   unsubscribeEmergencies =
     onSnapshot(
       collection(
@@ -240,10 +274,12 @@ const subscribeToEmergencies = () => {
       ),
 
       snapshot => {
+
         const emergencies = []
 
         snapshot.forEach(
           docSnap => {
+
             emergencies.push({
               _id: docSnap.id,
 
@@ -252,6 +288,7 @@ const subscribeToEmergencies = () => {
 
               ...docSnap.data()
             })
+
           }
         )
 
@@ -277,6 +314,7 @@ const subscribeToEmergencies = () => {
       },
 
       error => {
+
         console.error(
           '❌ Firestore emergency listener failed:',
           error
@@ -288,21 +326,27 @@ const subscribeToEmergencies = () => {
     )
 }
 
+
 /* =========================================================
-   LOCATION FROM PARENT
+   WATCH PARENT LOCATION
 ========================================================= */
 
 watch(
   () => props.focusLocation,
 
   location => {
+
     if (!location) return
 
     const latitude =
-      Number(location.latitude)
+      Number(
+        location.latitude
+      )
 
     const longitude =
-      Number(location.longitude)
+      Number(
+        location.longitude
+      )
 
     if (
       !Number.isFinite(latitude) ||
@@ -343,7 +387,9 @@ watch(
 
     selectedMarker
       .bindPopup(`
-        <strong>📍 Selected Location</strong>
+        <strong>
+          📍 Selected Location
+        </strong>
 
         <br><br>
 
@@ -363,11 +409,13 @@ watch(
   }
 )
 
+
 /* =========================================================
    MAP CLICK
 ========================================================= */
 
 const handleMapClick = event => {
+
   const latitude =
     event.latlng.lat
 
@@ -375,6 +423,7 @@ const handleMapClick = event => {
     event.latlng.lng
 
   if (selectedMarker) {
+
     map.removeLayer(
       selectedMarker
     )
@@ -388,7 +437,9 @@ const handleMapClick = event => {
 
   selectedMarker
     .bindPopup(`
-      <strong>📍 Selected Location</strong>
+      <strong>
+        📍 Selected Location
+      </strong>
 
       <br><br>
 
@@ -416,18 +467,107 @@ const handleMapClick = event => {
   )
 }
 
+
+/* =========================================================
+   NEARBY HELP LOCATION
+========================================================= */
+
+const handleNearbyLocation = location => {
+
+  if (!location) return
+
+  const latitude =
+    Number(
+      location.latitude
+    )
+
+  const longitude =
+    Number(
+      location.longitude
+    )
+
+  if (
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude)
+  ) {
+    return
+  }
+
+  selectedLocation.value = {
+    latitude,
+    longitude
+  }
+
+  emit(
+    'location-selected',
+    {
+      latitude,
+      longitude
+    }
+  )
+
+  if (!map) return
+
+  map.flyTo(
+    [
+      latitude,
+      longitude
+    ],
+    15,
+    {
+      duration: 1
+    }
+  )
+
+  if (selectedMarker) {
+
+    map.removeLayer(
+      selectedMarker
+    )
+  }
+
+  selectedMarker =
+    L.marker([
+      latitude,
+      longitude
+    ]).addTo(map)
+
+  selectedMarker
+    .bindPopup(`
+      <strong>
+        📍 Selected Location
+      </strong>
+
+      <br><br>
+
+      Latitude:
+      ${latitude.toFixed(6)}
+
+      <br>
+
+      Longitude:
+      ${longitude.toFixed(6)}
+    `)
+    .openPopup()
+}
+
+
 /* =========================================================
    DISPLAY EMERGENCIES
 ========================================================= */
 
 const displayEmergencies =
   emergencies => {
-    if (!emergencyLayer) return
+
+    if (!emergencyLayer) {
+      return
+    }
 
     emergencyLayer.clearLayers()
 
     emergencies.forEach(
       emergency => {
+
         if (
           emergency.latitude ==
             null ||
@@ -520,6 +660,7 @@ const displayEmergencies =
     )
   }
 
+
 /* =========================================================
    POPUP
 ========================================================= */
@@ -528,6 +669,7 @@ const createPopup = (
   emergency,
   color
 ) => {
+
   const status =
     String(
       emergency.status ||
@@ -540,9 +682,13 @@ const createPopup = (
 
   let statusContent = ''
 
+
+  /* PENDING */
+
   if (
     status === 'pending'
   ) {
+
     statusContent = `
       <div style="
         margin-top:10px;
@@ -559,6 +705,7 @@ const createPopup = (
     `
 
     if (props.volunteerId) {
+
       statusContent += `
         <button
           class="aidmap-accept-button"
@@ -587,9 +734,13 @@ const createPopup = (
     }
   }
 
+
+  /* ACCEPTED */
+
   else if (
     status === 'accepted'
   ) {
+
     statusContent = `
       <div style="
         margin-top:10px;
@@ -606,10 +757,14 @@ const createPopup = (
     `
   }
 
+
+  /* IN PROGRESS */
+
   else if (
     status === 'in progress' ||
     status === 'in_progress'
   ) {
+
     statusContent = `
       <div style="
         margin-top:10px;
@@ -626,9 +781,13 @@ const createPopup = (
     `
   }
 
+
+  /* RESOLVED */
+
   else if (
     status === 'resolved'
   ) {
+
     statusContent = `
       <div style="
         margin-top:10px;
@@ -645,6 +804,7 @@ const createPopup = (
     `
   }
 
+
   return `
     <div style="min-width:220px;">
 
@@ -652,6 +812,7 @@ const createPopup = (
         margin:0 0 8px;
         font-size:16px;
       ">
+
         ${getIcon(
           emergency.type
         )}
@@ -660,62 +821,82 @@ const createPopup = (
           emergency.type ||
             'Emergency'
         )}
+
       </h3>
+
 
       <div style="
         margin-bottom:6px;
         font-weight:600;
       ">
+
         Priority:
 
         <span style="
           color:${color};
         ">
+
           ${escapeHtml(
             emergency.priority ||
-              emergency.severity ||
-              'Unknown'
+            emergency.severity ||
+            'Unknown'
           )}
+
         </span>
+
       </div>
+
 
       <div style="
         margin-bottom:8px;
         font-size:12px;
       ">
+
         Status:
 
         <strong>
+
           ${escapeHtml(
             emergency.status ||
               'pending'
           )}
+
         </strong>
+
       </div>
+
 
       <p style="
         margin:8px 0;
         color:#374151;
         font-size:13px;
       ">
+
         ${escapeHtml(
           emergency.description ||
             'No description provided.'
         )}
+
       </p>
+
 
       <div style="
         font-size:11px;
         color:#6b7280;
       ">
+
         📍
+
         ${latitudeText(
           emergency.latitude
         )},
+
         ${longitudeText(
           emergency.longitude
         )}
+
       </div>
+
 
       ${
         volunteer
@@ -725,17 +906,22 @@ const createPopup = (
               color:#6b7280;
               font-size:12px;
             ">
+
               👤 Volunteer:
 
               <strong>
+
                 ${escapeHtml(
                   volunteer
                 )}
+
               </strong>
+
             </div>
           `
           : ''
       }
+
 
       ${statusContent}
 
@@ -743,12 +929,14 @@ const createPopup = (
   `
 }
 
+
 /* =========================================================
-   ACCEPT EMERGENCY
+   POPUP CLICK
 ========================================================= */
 
 const handlePopupClick =
   event => {
+
     const button =
       event.target.closest(
         '.aidmap-accept-button'
@@ -771,9 +959,16 @@ const handlePopupClick =
     )
   }
 
+
+/* =========================================================
+   ACCEPT EMERGENCY
+========================================================= */
+
 const acceptEmergency =
   async emergencyId => {
+
     if (!props.volunteerId) {
+
       alert(
         'Please login as a volunteer first.'
       )
@@ -782,6 +977,7 @@ const acceptEmergency =
     }
 
     try {
+
       updatingEmergency.value =
         true
 
@@ -815,9 +1011,11 @@ const acceptEmergency =
       console.log(
         '✅ Emergency accepted'
       )
+
     }
 
     catch (error) {
+
       console.error(
         '❌ Accept emergency failed:',
         error
@@ -826,31 +1024,57 @@ const acceptEmergency =
       alert(
         'Unable to accept this emergency.'
       )
+
     }
 
     finally {
+
       updatingEmergency.value =
         false
     }
   }
 
+
 /* =========================================================
-   HELPERS
+   ICONS
 ========================================================= */
 
 const getIcon = type => {
+
   const icons = {
-    'Potable Water': '💧',
-    'Medical Aid': '🚑',
-    'Search & Rescue': '🛟',
-    Shelter: '🏠',
-    Water: '💧',
-    Medical: '🏥',
-    Rescue: '🛟',
-    Transport: '🚗',
-    Food: '🍱',
-    Supplies: '📦',
-    Power: '⚡'
+
+    'Potable Water':
+      '💧',
+
+    'Medical Aid':
+      '🚑',
+
+    'Search & Rescue':
+      '🛟',
+
+    Shelter:
+      '🏠',
+
+    Water:
+      '💧',
+
+    Medical:
+      '🏥',
+
+    Rescue:
+      '🛟',
+
+    Transport:
+      '🚗',
+
+    Food:
+      '🍱',
+
+    Supplies:
+      '📦',
+
+    Power:
+      '⚡'
   }
 
   return (
@@ -859,11 +1083,17 @@ const getIcon = type => {
   )
 }
 
+
+/* =========================================================
+   PRIORITY COLOR
+========================================================= */
+
 const getPriorityColor =
   (
     priority,
     status
   ) => {
+
     if (
       status ===
       'resolved'
@@ -876,6 +1106,7 @@ const getPriorityColor =
         priority || ''
       ).toLowerCase()
     ) {
+
       case 'critical':
         return '#dc2626'
 
@@ -893,8 +1124,14 @@ const getPriorityColor =
     }
   }
 
+
+/* =========================================================
+   COORDINATES
+========================================================= */
+
 const latitudeText =
   value => {
+
     const number =
       Number(value)
 
@@ -904,9 +1141,11 @@ const latitudeText =
       ? number.toFixed(5)
       : '--'
   }
+
 
 const longitudeText =
   value => {
+
     const number =
       Number(value)
 
@@ -917,8 +1156,14 @@ const longitudeText =
       : '--'
   }
 
+
+/* =========================================================
+   ESCAPE HTML
+========================================================= */
+
 const escapeHtml =
   value => {
+
     if (
       value === null ||
       value === undefined
@@ -927,44 +1172,50 @@ const escapeHtml =
     }
 
     return String(value)
+
       .replace(
         /&/g,
         '&amp;'
       )
+
       .replace(
         /</g,
         '&lt;'
       )
+
       .replace(
         />/g,
         '&gt;'
       )
+
       .replace(
         /"/g,
         '&quot;'
       )
+
       .replace(
         /'/g,
         '&#039;'
       )
   }
 
+
 /* =========================================================
    LIFECYCLE
 ========================================================= */
 
 onMounted(() => {
+
   initializeMap()
 
   subscribeToEmergencies()
 
-  /*
-   * Listen for popup button clicks.
-   */
   if (map) {
+
     map.on(
       'popupopen',
       event => {
+
         const popupElement =
           event.popup.getElement()
 
@@ -979,10 +1230,13 @@ onMounted(() => {
   }
 })
 
+
 onBeforeUnmount(() => {
+
   if (
     unsubscribeEmergencies
   ) {
+
     unsubscribeEmergencies()
 
     unsubscribeEmergencies =
@@ -990,6 +1244,7 @@ onBeforeUnmount(() => {
   }
 
   if (map) {
+
     map.remove()
 
     map = null
@@ -997,8 +1252,11 @@ onBeforeUnmount(() => {
 })
 </script>
 
+
 <template>
+
   <div class="crisis-dashboard">
+
 
     <!-- =====================================================
          HEADER
@@ -1007,6 +1265,7 @@ onBeforeUnmount(() => {
     <header class="dashboard-header">
 
       <div>
+
         <h1>
           🚨 Crisis Response Center
         </h1>
@@ -1015,11 +1274,16 @@ onBeforeUnmount(() => {
           Monitor emergencies, coordinate volunteers
           and find nearby emergency services.
         </p>
+
       </div>
 
+
       <div class="live-indicator">
+
         <span class="live-dot"></span>
+
         LIVE
+
       </div>
 
     </header>
@@ -1031,12 +1295,15 @@ onBeforeUnmount(() => {
 
     <section class="stats-grid">
 
+
       <div class="stat-card">
+
         <div class="stat-icon">
           🚨
         </div>
 
         <div>
+
           <span>
             Total Emergencies
           </span>
@@ -1044,15 +1311,20 @@ onBeforeUnmount(() => {
           <strong>
             {{ totalEmergencies() }}
           </strong>
+
         </div>
+
       </div>
 
+
       <div class="stat-card pending">
+
         <div class="stat-icon">
           ⏳
         </div>
 
         <div>
+
           <span>
             Waiting
           </span>
@@ -1060,15 +1332,20 @@ onBeforeUnmount(() => {
           <strong>
             {{ pendingEmergencies() }}
           </strong>
+
         </div>
+
       </div>
 
+
       <div class="stat-card active">
+
         <div class="stat-icon">
           🚑
         </div>
 
         <div>
+
           <span>
             Active Response
           </span>
@@ -1076,15 +1353,20 @@ onBeforeUnmount(() => {
           <strong>
             {{ activeEmergencies() }}
           </strong>
+
         </div>
+
       </div>
 
+
       <div class="stat-card resolved">
+
         <div class="stat-icon">
           ✅
         </div>
 
         <div>
+
           <span>
             Resolved
           </span>
@@ -1092,21 +1374,25 @@ onBeforeUnmount(() => {
           <strong>
             {{ resolvedEmergencies() }}
           </strong>
+
         </div>
+
       </div>
 
     </section>
 
 
     <!-- =====================================================
-         MAP
+         LIVE MAP
     ====================================================== -->
 
     <section class="dashboard-card">
 
+
       <div class="card-header">
 
         <div>
+
           <h2>
             🗺️ Live Emergency Map
           </h2>
@@ -1114,13 +1400,16 @@ onBeforeUnmount(() => {
           <p>
             Click anywhere on the map to select a location.
           </p>
+
         </div>
+
 
         <span class="map-status">
           🟢 Real-time
         </span>
 
       </div>
+
 
       <div class="map-wrapper">
 
@@ -1135,14 +1424,17 @@ onBeforeUnmount(() => {
 
 
     <!-- =====================================================
-         EMERGENCY LIST
+         EMERGENCY REQUESTS
     ====================================================== -->
 
-    <section class="dashboard-card emergency-section">
+    <section
+      class="dashboard-card emergency-section"
+    >
 
       <div class="card-header">
 
         <div>
+
           <h2>
             📋 Emergency Requests
           </h2>
@@ -1150,6 +1442,7 @@ onBeforeUnmount(() => {
           <p>
             Live emergency requests from the community.
           </p>
+
         </div>
 
       </div>
@@ -1165,30 +1458,54 @@ onBeforeUnmount(() => {
           placeholder="🔍 Search emergencies..."
         />
 
+
         <button
-          :class="{ active: activeFilter === 'all' }"
-          @click="activeFilter = 'all'"
+          :class="{
+            active:
+              activeFilter === 'all'
+          }"
+          @click="
+            activeFilter = 'all'
+          "
         >
           All
         </button>
 
+
         <button
-          :class="{ active: activeFilter === 'pending' }"
-          @click="activeFilter = 'pending'"
+          :class="{
+            active:
+              activeFilter === 'pending'
+          }"
+          @click="
+            activeFilter = 'pending'
+          "
         >
           ⏳ Pending
         </button>
 
+
         <button
-          :class="{ active: activeFilter === 'accepted' }"
-          @click="activeFilter = 'accepted'"
+          :class="{
+            active:
+              activeFilter === 'accepted'
+          }"
+          @click="
+            activeFilter = 'accepted'
+          "
         >
           🙋 Accepted
         </button>
 
+
         <button
-          :class="{ active: activeFilter === 'resolved' }"
-          @click="activeFilter = 'resolved'"
+          :class="{
+            active:
+              activeFilter === 'resolved'
+          }"
+          @click="
+            activeFilter = 'resolved'
+          "
         >
           ✅ Resolved
         </button>
@@ -1202,16 +1519,21 @@ onBeforeUnmount(() => {
         v-if="loadingEmergencies"
         class="empty-state"
       >
+
         🔄 Loading emergencies...
+
       </div>
 
 
       <!-- EMPTY -->
 
       <div
-        v-else-if="filteredEmergencies().length === 0"
+        v-else-if="
+          filteredEmergencies().length === 0
+        "
         class="empty-state"
       >
+
         <div>
           📭
         </div>
@@ -1221,8 +1543,10 @@ onBeforeUnmount(() => {
         </strong>
 
         <p>
-          There are no emergency requests matching your filter.
+          There are no emergency requests
+          matching your filter.
         </p>
+
       </div>
 
 
@@ -1234,72 +1558,120 @@ onBeforeUnmount(() => {
       >
 
         <article
-          v-for="emergency in filteredEmergencies()"
-          :key="emergency.firestoreId || emergency._id"
+          v-for="
+            emergency in filteredEmergencies()
+          "
+          :key="
+            emergency.firestoreId ||
+            emergency._id
+          "
           class="emergency-card"
         >
 
+
           <div
             class="emergency-icon"
-            :class="String(emergency.priority || 'low').toLowerCase()"
+            :class="
+              String(
+                emergency.priority ||
+                emergency.severity ||
+                'low'
+              ).toLowerCase()
+            "
           >
-            {{ getIcon(emergency.type) }}
+
+            {{
+              getIcon(
+                emergency.type
+              )
+            }}
+
           </div>
+
 
           <div class="emergency-content">
 
+
             <div class="emergency-title">
 
+
               <div>
+
                 <h3>
-                  {{ emergency.type || 'Emergency' }}
+                  {{
+                    emergency.type ||
+                    'Emergency'
+                  }}
                 </h3>
 
                 <span>
+
                   {{
                     emergency.priority ||
                     emergency.severity ||
                     'Low'
                   }}
+
                 </span>
+
               </div>
+
 
               <strong
                 class="status-badge"
-                :class="String(emergency.status || 'pending')
-                  .toLowerCase()
-                  .replace(' ', '-')"
+                :class="
+                  String(
+                    emergency.status ||
+                    'pending'
+                  )
+                    .toLowerCase()
+                    .replace(
+                      ' ',
+                      '-'
+                    )
+                "
               >
+
                 {{
                   emergency.status ||
                   'Pending'
                 }}
+
               </strong>
 
             </div>
 
+
             <p>
+
               {{
                 emergency.description ||
                 'No description provided.'
               }}
+
             </p>
+
 
             <div class="emergency-meta">
 
               <span>
+
                 📍
+
                 {{
                   latitudeText(
                     emergency.latitude
                   )
                 }},
+
                 {{
                   longitudeText(
                     emergency.longitude
                   )
                 }}
+
               </span>
+
 
               <span
                 v-if="
@@ -1307,11 +1679,14 @@ onBeforeUnmount(() => {
                   emergency.assignedVolunteerName
                 "
               >
+
                 👤
+
                 {{
                   emergency.assignedVolunteer ||
                   emergency.assignedVolunteerName
                 }}
+
               </span>
 
             </div>
@@ -1331,24 +1706,15 @@ onBeforeUnmount(() => {
 
     <NearbyHelp
       :location="selectedLocation"
-      @location-selected="handleNearbyLocation"
+      @location-selected="
+        handleNearbyLocation
+      "
     />
 
   </div>
+
 </template>
 
-<script>
-export default {
-  methods: {
-    handleNearbyLocation(location) {
-      this.$emit(
-        'location-selected',
-        location
-      )
-    }
-  }
-}
-</script>
 
 <style scoped>
 
@@ -1357,7 +1723,9 @@ export default {
 ========================================================= */
 
 .crisis-dashboard {
+
   width: 100%;
+
   min-height: 100vh;
 
   padding: 20px;
@@ -1375,6 +1743,7 @@ export default {
 ========================================================= */
 
 .dashboard-header {
+
   display: flex;
 
   justify-content: space-between;
@@ -1387,6 +1756,7 @@ export default {
 }
 
 .dashboard-header h1 {
+
   margin: 0;
 
   color: #0f172a;
@@ -1395,6 +1765,7 @@ export default {
 }
 
 .dashboard-header p {
+
   margin: 6px 0 0;
 
   color: #64748b;
@@ -1403,6 +1774,7 @@ export default {
 }
 
 .live-indicator {
+
   display: flex;
 
   align-items: center;
@@ -1423,6 +1795,7 @@ export default {
 }
 
 .live-dot {
+
   width: 8px;
 
   height: 8px;
@@ -1435,6 +1808,7 @@ export default {
 }
 
 @keyframes pulse {
+
   0% {
     opacity: 1;
   }
@@ -1454,6 +1828,7 @@ export default {
 ========================================================= */
 
 .stats-grid {
+
   display: grid;
 
   grid-template-columns:
@@ -1465,6 +1840,7 @@ export default {
 }
 
 .stat-card {
+
   display: flex;
 
   align-items: center;
@@ -1481,6 +1857,7 @@ export default {
 }
 
 .stat-icon {
+
   width: 42px;
 
   height: 42px;
@@ -1499,6 +1876,7 @@ export default {
 }
 
 .stat-card span {
+
   display: block;
 
   color: #64748b;
@@ -1507,6 +1885,7 @@ export default {
 }
 
 .stat-card strong {
+
   display: block;
 
   margin-top: 3px;
@@ -1522,6 +1901,7 @@ export default {
 ========================================================= */
 
 .dashboard-card {
+
   margin-bottom: 20px;
 
   background: white;
@@ -1534,6 +1914,7 @@ export default {
 }
 
 .card-header {
+
   display: flex;
 
   justify-content: space-between;
@@ -1546,6 +1927,7 @@ export default {
 }
 
 .card-header h2 {
+
   margin: 0;
 
   color: #0f172a;
@@ -1554,6 +1936,7 @@ export default {
 }
 
 .card-header p {
+
   margin: 4px 0 0;
 
   color: #64748b;
@@ -1562,6 +1945,7 @@ export default {
 }
 
 .map-status {
+
   color: #16a34a;
 
   font-size: 11px;
@@ -1575,12 +1959,14 @@ export default {
 ========================================================= */
 
 .map-wrapper {
+
   width: 100%;
 
   height: 500px;
 }
 
 .disaster-map {
+
   width: 100%;
 
   height: 100%;
@@ -1594,6 +1980,7 @@ export default {
 ========================================================= */
 
 .filters {
+
   display: flex;
 
   flex-wrap: wrap;
@@ -1606,6 +1993,7 @@ export default {
 }
 
 .filters input {
+
   flex: 1;
 
   min-width: 180px;
@@ -1621,7 +2009,13 @@ export default {
   font-size: 11px;
 }
 
+.filters input:focus {
+
+  border-color: #2563eb;
+}
+
 .filters button {
+
   border: 1px solid #e2e8f0;
 
   background: #f8fafc;
@@ -1639,7 +2033,13 @@ export default {
   font-weight: 700;
 }
 
+.filters button:hover {
+
+  border-color: #93c5fd;
+}
+
 .filters button.active {
+
   background: #eff6ff;
 
   border-color: #2563eb;
@@ -1653,6 +2053,7 @@ export default {
 ========================================================= */
 
 .emergency-list {
+
   display: flex;
 
   flex-direction: column;
@@ -1663,6 +2064,7 @@ export default {
 }
 
 .emergency-card {
+
   display: flex;
 
   gap: 12px;
@@ -1677,12 +2079,14 @@ export default {
 }
 
 .emergency-card:hover {
+
   border-color: #93c5fd;
 
   transform: translateY(-1px);
 }
 
 .emergency-icon {
+
   width: 42px;
 
   height: 42px;
@@ -1703,12 +2107,14 @@ export default {
 }
 
 .emergency-content {
+
   flex: 1;
 
   min-width: 0;
 }
 
 .emergency-title {
+
   display: flex;
 
   justify-content: space-between;
@@ -1717,6 +2123,7 @@ export default {
 }
 
 .emergency-title h3 {
+
   margin: 0;
 
   color: #0f172a;
@@ -1725,6 +2132,7 @@ export default {
 }
 
 .emergency-title span {
+
   display: inline-block;
 
   margin-top: 3px;
@@ -1735,6 +2143,7 @@ export default {
 }
 
 .emergency-content p {
+
   margin: 7px 0;
 
   color: #475569;
@@ -1743,6 +2152,7 @@ export default {
 }
 
 .status-badge {
+
   align-self: flex-start;
 
   padding: 4px 7px;
@@ -1761,24 +2171,28 @@ export default {
 }
 
 .status-badge.accepted {
+
   background: #dbeafe;
 
   color: #2563eb;
 }
 
 .status-badge.in-progress {
+
   background: #ede9fe;
 
   color: #7c3aed;
 }
 
 .status-badge.resolved {
+
   background: #dcfce7;
 
   color: #16a34a;
 }
 
 .emergency-meta {
+
   display: flex;
 
   flex-wrap: wrap;
@@ -1796,6 +2210,7 @@ export default {
 ========================================================= */
 
 .empty-state {
+
   padding: 35px;
 
   text-align: center;
@@ -1806,15 +2221,22 @@ export default {
 }
 
 .empty-state div {
+
   font-size: 28px;
 
   margin-bottom: 8px;
 }
 
 .empty-state strong {
+
   display: block;
 
   color: #334155;
+}
+
+.empty-state p {
+
+  margin-top: 5px;
 }
 
 
@@ -1825,39 +2247,47 @@ export default {
 @media (max-width: 900px) {
 
   .stats-grid {
+
     grid-template-columns:
       repeat(2, 1fr);
   }
 
 }
 
+
 @media (max-width: 600px) {
 
   .crisis-dashboard {
+
     padding: 10px;
   }
 
   .dashboard-header {
+
     align-items: flex-start;
 
     flex-direction: column;
   }
 
   .stats-grid {
+
     grid-template-columns: 1fr;
   }
 
   .map-wrapper {
+
     height: 430px;
   }
 
   .card-header {
+
     align-items: flex-start;
 
     gap: 10px;
   }
 
   .emergency-title {
+
     flex-direction: column;
   }
 
