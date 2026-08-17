@@ -15,11 +15,16 @@ import {
   getEmergencies
 } from '../services/api'
 
-// Fix Leaflet marker icons
+
+// ====================================
+// LEAFLET ICON FIX
+// ====================================
+
 delete L.Icon.Default.prototype
   ._getIconUrl
 
 L.Icon.Default.mergeOptions({
+
   iconRetinaUrl:
     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
 
@@ -28,18 +33,43 @@ L.Icon.Default.mergeOptions({
 
   shadowUrl:
     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png'
+
 })
 
+
+// ====================================
+// PROPS
+// ====================================
+
 const props = defineProps({
+
   focusLocation: {
     type: Object,
     default: null
+  },
+
+  volunteerId: {
+    type: String,
+    default: ''
   }
+
 })
 
+
+// ====================================
+// EVENTS
+// ====================================
+
 const emit = defineEmits([
-  'location-selected'
+  'location-selected',
+  'emergencies-updated',
+  'accept-emergency'
 ])
+
+
+// ====================================
+// MAP STATE
+// ====================================
 
 const mapContainer = ref(null)
 
@@ -51,9 +81,10 @@ let emergencyLayer = null
 
 let refreshInterval = null
 
-// ------------------------------------
-// INITIALIZE
-// ------------------------------------
+
+// ====================================
+// INITIALIZE MAP
+// ====================================
 
 onMounted(() => {
 
@@ -63,6 +94,7 @@ onMounted(() => {
     [12.8260, 80.2333],
     12
   )
+
 
   L.tileLayer(
     'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -74,15 +106,19 @@ onMounted(() => {
     }
   ).addTo(map)
 
+
   emergencyLayer =
     L.layerGroup().addTo(map)
+
 
   map.on(
     'click',
     handleMapClick
   )
 
+
   loadEmergencies()
+
 
   refreshInterval =
     setInterval(
@@ -93,12 +129,13 @@ onMounted(() => {
 })
 
 
-// ------------------------------------
-// WATCH MAP FOCUS
-// ------------------------------------
+// ====================================
+// WATCH FOCUS LOCATION
+// ====================================
 
 watch(
   () => props.focusLocation,
+
   (location) => {
 
     if (
@@ -108,11 +145,13 @@ watch(
       return
     }
 
+
     const latitude =
       Number(location.latitude)
 
     const longitude =
       Number(location.longitude)
+
 
     if (
       !Number.isFinite(latitude) ||
@@ -121,8 +160,12 @@ watch(
       return
     }
 
+
     map.flyTo(
-      [latitude, longitude],
+      [
+        latitude,
+        longitude
+      ],
       15,
       {
         duration: 1
@@ -130,15 +173,17 @@ watch(
     )
 
   },
+
   {
     deep: true
   }
+
 )
 
 
-// ------------------------------------
+// ====================================
 // MAP CLICK
-// ------------------------------------
+// ====================================
 
 const handleMapClick = (event) => {
 
@@ -148,6 +193,7 @@ const handleMapClick = (event) => {
   const longitude =
     event.latlng.lng
 
+
   if (selectedMarker) {
 
     map.removeLayer(
@@ -156,23 +202,32 @@ const handleMapClick = (event) => {
 
   }
 
+
   selectedMarker =
     L.marker([
       latitude,
       longitude
     ]).addTo(map)
 
+
   selectedMarker
     .bindPopup(`
-      <strong>Selected Location</strong>
+      <strong>
+        Selected Location
+      </strong>
+
       <br>
+
       Latitude:
       ${latitude.toFixed(6)}
+
       <br>
+
       Longitude:
       ${longitude.toFixed(6)}
     `)
     .openPopup()
+
 
   emit(
     'location-selected',
@@ -185,9 +240,9 @@ const handleMapClick = (event) => {
 }
 
 
-// ------------------------------------
+// ====================================
 // LOAD EMERGENCIES
-// ------------------------------------
+// ====================================
 
 const loadEmergencies = async () => {
 
@@ -196,10 +251,18 @@ const loadEmergencies = async () => {
     const response =
       await getEmergencies()
 
+
     const emergencies =
       response.emergencies || []
 
+
     displayEmergencies(
+      emergencies
+    )
+
+
+    emit(
+      'emergencies-updated',
       emergencies
     )
 
@@ -215,9 +278,9 @@ const loadEmergencies = async () => {
 }
 
 
-// ------------------------------------
-// DISPLAY
-// ------------------------------------
+// ====================================
+// DISPLAY EMERGENCIES
+// ====================================
 
 const displayEmergencies = (
   emergencies
@@ -227,7 +290,9 @@ const displayEmergencies = (
     return
   }
 
+
   emergencyLayer.clearLayers()
+
 
   emergencies.forEach(
     emergency => {
@@ -239,16 +304,19 @@ const displayEmergencies = (
         return
       }
 
+
       const latitude =
         Number(emergency.latitude)
 
       const longitude =
         Number(emergency.longitude)
 
+
       const color =
         getPriorityColor(
           emergency.priority
         )
+
 
       const marker =
         L.circleMarker(
@@ -257,27 +325,34 @@ const displayEmergencies = (
             longitude
           ],
           {
+
             radius:
               emergency.status ===
               'resolved'
                 ? 7
                 : 10,
 
-            fillColor: color,
+            fillColor:
+              color,
 
-            color: '#ffffff',
+            color:
+              '#ffffff',
 
-            weight: 3,
+            weight:
+              3,
 
-            opacity: 1,
+            opacity:
+              1,
 
             fillOpacity:
               emergency.status ===
               'resolved'
                 ? 0.55
                 : 0.9
+
           }
         )
+
 
       marker.bindPopup(
         createPopup(
@@ -285,6 +360,7 @@ const displayEmergencies = (
           color
         )
       )
+
 
       marker.addTo(
         emergencyLayer
@@ -296,14 +372,15 @@ const displayEmergencies = (
 }
 
 
-// ------------------------------------
+// ====================================
 // POPUP
-// ------------------------------------
+// ====================================
 
 const createPopup = (
   emergency,
   color
 ) => {
+
 
   const volunteer =
     emergency.assignedVolunteer
@@ -313,17 +390,26 @@ const createPopup = (
           color: #6b7280;
           font-size: 12px;
         ">
+
           👤 Volunteer:
+
           <strong>
             ${escapeHtml(
               emergency.assignedVolunteer
             )}
           </strong>
+
         </div>
       `
       : ''
 
+
   let statusContent = ''
+
+
+  // ==================================
+  // PENDING
+  // ==================================
 
   if (
     emergency.status ===
@@ -331,6 +417,7 @@ const createPopup = (
   ) {
 
     statusContent = `
+
       <div style="
         margin-top: 10px;
         padding: 8px;
@@ -341,9 +428,53 @@ const createPopup = (
         font-weight: 600;
         font-size: 12px;
       ">
+
         ⏳ Waiting for a volunteer
+
       </div>
+
     `
+
+
+    // ==================================
+    // ACCEPT BUTTON
+    // ==================================
+
+    if (props.volunteerId) {
+
+      statusContent += `
+
+        <button
+          class="aidmap-accept-button"
+          data-emergency-id="${escapeHtml(
+            emergency._id
+          )}"
+          style="
+            width: 100%;
+            margin-top: 10px;
+            padding: 10px;
+            border: none;
+            border-radius: 8px;
+            background: #16a34a;
+            color: white;
+            font-weight: 700;
+            cursor: pointer;
+            font-size: 13px;
+          "
+        >
+
+          🙋 I Can Help
+
+        </button>
+
+      `
+
+    }
+
+
+  // ==================================
+  // ACCEPTED
+  // ==================================
 
   } else if (
     emergency.status ===
@@ -351,6 +482,7 @@ const createPopup = (
   ) {
 
     statusContent = `
+
       <div style="
         margin-top: 10px;
         padding: 8px;
@@ -361,13 +493,22 @@ const createPopup = (
         font-weight: 600;
         font-size: 12px;
       ">
+
         🙋 Help is on the way
+
       </div>
+
     `
+
+
+  // ==================================
+  // RESOLVED
+  // ==================================
 
   } else {
 
     statusContent = `
+
       <div style="
         margin-top: 10px;
         padding: 8px;
@@ -378,26 +519,38 @@ const createPopup = (
         font-weight: 600;
         font-size: 12px;
       ">
+
         ✅ Resolved
+
       </div>
+
     `
 
   }
 
+
   return `
+
     <div style="
       min-width: 220px;
     ">
+
 
       <h3 style="
         margin: 0 0 8px;
         font-size: 16px;
       ">
-        ${getIcon(emergency.type)}
+
+        ${getIcon(
+          emergency.type
+        )}
+
         ${escapeHtml(
           emergency.type
         )}
+
       </h3>
+
 
       <div style="
         margin-bottom: 6px;
@@ -409,12 +562,15 @@ const createPopup = (
         <span style="
           color: ${color};
         ">
+
           ${escapeHtml(
             emergency.priority
           )}
+
         </span>
 
       </div>
+
 
       <div style="
         margin-bottom: 8px;
@@ -422,13 +578,17 @@ const createPopup = (
       ">
 
         Status:
+
         <strong>
+
           ${escapeHtml(
             emergency.status
           )}
+
         </strong>
 
       </div>
+
 
       <p style="
         margin: 8px 0;
@@ -442,58 +602,158 @@ const createPopup = (
 
       </p>
 
+
       <div style="
         font-size: 11px;
         color: #6b7280;
       ">
 
         📍
+
         ${latitudeText(
           emergency.latitude
         )},
+
         ${longitudeText(
           emergency.longitude
         )}
 
       </div>
 
+
       ${volunteer}
+
 
       ${statusContent}
 
+
     </div>
+
   `
+
 }
 
 
-// ------------------------------------
+// ====================================
+// HANDLE POPUP BUTTON
+// ====================================
+
+const handlePopupClick = (event) => {
+
+  const button =
+    event.target.closest(
+      '.aidmap-accept-button'
+    )
+
+
+  if (!button) {
+    return
+  }
+
+
+  const emergencyId =
+    button.dataset.emergencyId
+
+
+  if (!emergencyId) {
+    return
+  }
+
+
+  emit(
+    'accept-emergency',
+    emergencyId
+  )
+
+}
+
+
+// ====================================
+// MAP POPUP EVENT
+// ====================================
+
+const attachPopupListeners = () => {
+
+  if (!map) {
+    return
+  }
+
+
+  map.on(
+    'popupopen',
+    (event) => {
+
+      const popupElement =
+        event.popup.getElement()
+
+
+      if (!popupElement) {
+        return
+      }
+
+
+      popupElement.addEventListener(
+        'click',
+        handlePopupClick
+      )
+
+    }
+  )
+
+}
+
+
+// ====================================
 // ICON
-// ------------------------------------
+// ====================================
 
 const getIcon = (type) => {
 
   const icons = {
-    Water: '💧',
-    Medical: '🏥',
-    Food: '🍱',
-    Rescue: '🛟',
-    Shelter: '🏠',
-    Power: '⚡'
+
+    'Potable Water':
+      '💧',
+
+    'Medical Aid':
+      '🚑',
+
+    'Search & Rescue':
+      '🛟',
+
+    Shelter:
+      '🏠',
+
+    Water:
+      '💧',
+
+    Medical:
+      '🏥',
+
+    Rescue:
+      '🛟'
+
   }
 
-  return icons[type] || '🚨'
+
+  return (
+    icons[type] ||
+    '🚨'
+  )
+
 }
 
 
-// ------------------------------------
+// ====================================
 // PRIORITY COLOR
-// ------------------------------------
+// ====================================
 
 const getPriorityColor = (
   priority
 ) => {
 
-  switch (priority) {
+  switch (
+    priority
+  ) {
 
     case 'Critical':
       return '#ef4444'
@@ -502,7 +762,7 @@ const getPriorityColor = (
       return '#f59e0b'
 
     case 'Low':
-      return '#22c55e'
+      return '#facc15'
 
     default:
       return '#6b7280'
@@ -512,9 +772,9 @@ const getPriorityColor = (
 }
 
 
-// ------------------------------------
+// ====================================
 // FORMAT COORDINATES
-// ------------------------------------
+// ====================================
 
 const latitudeText = (
   value
@@ -523,11 +783,13 @@ const latitudeText = (
   const number =
     Number(value)
 
+
   return Number.isFinite(number)
     ? number.toFixed(5)
     : '--'
 
 }
+
 
 const longitudeText = (
   value
@@ -536,6 +798,7 @@ const longitudeText = (
   const number =
     Number(value)
 
+
   return Number.isFinite(number)
     ? number.toFixed(5)
     : '--'
@@ -543,9 +806,9 @@ const longitudeText = (
 }
 
 
-// ------------------------------------
+// ====================================
 // ESCAPE HTML
-// ------------------------------------
+// ====================================
 
 const escapeHtml = (
   value
@@ -555,26 +818,34 @@ const escapeHtml = (
     value === null ||
     value === undefined
   ) {
+
     return ''
+
   }
 
+
   return String(value)
+
     .replace(
       /&/g,
       '&amp;'
     )
+
     .replace(
       /</g,
       '&lt;'
     )
+
     .replace(
       />/g,
       '&gt;'
     )
+
     .replace(
       /"/g,
       '&quot;'
     )
+
     .replace(
       /'/g,
       '&#039;'
@@ -583,9 +854,9 @@ const escapeHtml = (
 }
 
 
-// ------------------------------------
+// ====================================
 // CLEANUP
-// ------------------------------------
+// ====================================
 
 onBeforeUnmount(() => {
 
@@ -597,6 +868,7 @@ onBeforeUnmount(() => {
 
   }
 
+
   if (map) {
 
     map.remove()
@@ -605,7 +877,23 @@ onBeforeUnmount(() => {
 
 })
 
+
+// ====================================
+// ATTACH POPUP LISTENER
+// ====================================
+
+onMounted(() => {
+
+  setTimeout(() => {
+
+    attachPopupListeners()
+
+  }, 500)
+
+})
+
 </script>
+
 
 <template>
 
@@ -616,14 +904,17 @@ onBeforeUnmount(() => {
 
 </template>
 
+
 <style scoped>
 
 .disaster-map {
+
   width: 100%;
 
   height: 100%;
 
   min-height: 400px;
+
 }
 
 </style>
