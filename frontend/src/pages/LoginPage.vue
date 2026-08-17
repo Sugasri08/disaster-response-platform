@@ -1,15 +1,15 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { doc, getDoc } from 'firebase/firestore'
 
 import {
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
   GoogleAuthProvider,
   signInWithPopup
 } from 'firebase/auth'
 
-import { auth } from '../firebase/firebase'
+import { auth, db } from '../firebase/firebase'
 
 const router = useRouter()
 
@@ -20,209 +20,118 @@ const loading = ref(false)
 const errorMessage = ref('')
 const successMessage = ref('')
 
+const redirectUser = async (user) => {
+  try {
+    const userRef = doc(db, 'users', user.uid)
+    const snapshot = await getDoc(userRef)
+    if (snapshot.exists()) {
+      const data = snapshot.data()
+      if (data.role === 'volunteer') {
+        router.push('/volunteer')
+      } else if (data.role === 'help_seeker' || data.role === 'requester') {
+        router.push('/crisis')
+      } else {
+        router.push('/onboarding')
+      }
+    } else {
+      router.push('/onboarding')
+    }
+  } catch (error) {
+    console.error('Error fetching role during login redirect:', error)
+    router.push('/onboarding') // Fallback
+  }
+}
 
 // ===============================
 // LOGIN
 // ===============================
 
 const login = async () => {
-
   errorMessage.value = ''
   successMessage.value = ''
 
   if (!email.value || !password.value) {
-    errorMessage.value =
-      'Please enter your email and password.'
+    errorMessage.value = 'Please enter your email and password.'
     return
   }
 
   loading.value = true
 
   try {
-
-    await signInWithEmailAndPassword(
+    const userCredential = await signInWithEmailAndPassword(
       auth,
       email.value.trim(),
       password.value
     )
 
     successMessage.value = 'Login successful!'
-
-    router.push('/role-selection')
-
+    await redirectUser(userCredential.user)
   } catch (error) {
-
     console.error('Login error:', error)
 
     switch (error.code) {
-
       case 'auth/invalid-credential':
-        errorMessage.value =
-          'Invalid email or password.'
+        errorMessage.value = 'Invalid email or password.'
         break
 
       case 'auth/user-not-found':
-        errorMessage.value =
-          'No account exists with this email.'
+        errorMessage.value = 'No account exists with this email.'
         break
 
       case 'auth/wrong-password':
-        errorMessage.value =
-          'Incorrect password.'
+        errorMessage.value = 'Incorrect password.'
         break
 
       case 'auth/invalid-email':
-        errorMessage.value =
-          'Please enter a valid email address.'
+        errorMessage.value = 'Please enter a valid email address.'
         break
 
       case 'auth/too-many-requests':
-        errorMessage.value =
-          'Too many login attempts. Please try again later.'
+        errorMessage.value = 'Too many login attempts. Please try again later.'
         break
 
       default:
-        errorMessage.value =
-          'Login failed. Please try again.'
+        errorMessage.value = 'Login failed. Please try again.'
     }
-
   } finally {
-
     loading.value = false
-
   }
 }
-
-
-// ===============================
-// CREATE ACCOUNT
-// ===============================
-
-const createAccount = async () => {
-
-  errorMessage.value = ''
-  successMessage.value = ''
-
-  if (!email.value || !password.value) {
-
-    errorMessage.value =
-      'Enter an email and password first.'
-
-    return
-  }
-
-  if (password.value.length < 6) {
-
-    errorMessage.value =
-      'Password must contain at least 6 characters.'
-
-    return
-  }
-
-  loading.value = true
-
-  try {
-
-    await createUserWithEmailAndPassword(
-      auth,
-      email.value.trim(),
-      password.value
-    )
-
-    successMessage.value =
-      'Account created successfully!'
-
-    router.push('/role-selection')
-
-  } catch (error) {
-
-    console.error('Signup error:', error)
-
-    switch (error.code) {
-
-      case 'auth/email-already-in-use':
-        errorMessage.value =
-          'An account already exists with this email.'
-        break
-
-      case 'auth/invalid-email':
-        errorMessage.value =
-          'Please enter a valid email address.'
-        break
-
-      case 'auth/weak-password':
-        errorMessage.value =
-          'Password must contain at least 6 characters.'
-        break
-
-      default:
-        errorMessage.value =
-          'Unable to create account. Please try again.'
-    }
-
-  } finally {
-
-    loading.value = false
-
-  }
-}
-
 
 // ===============================
 // GOOGLE LOGIN
 // ===============================
 
 const googleLogin = async () => {
-
   errorMessage.value = ''
   successMessage.value = ''
 
   loading.value = true
 
   try {
-
     const provider = new GoogleAuthProvider()
+    const userCredential = await signInWithPopup(auth, provider)
 
-    await signInWithPopup(
-      auth,
-      provider
-    )
-
-    successMessage.value =
-      'Google login successful!'
-
-    router.push('/role-selection')
-
+    successMessage.value = 'Google login successful!'
+    await redirectUser(userCredential.user)
   } catch (error) {
-
     console.error('Google login error:', error)
 
     if (error.code === 'auth/popup-closed-by-user') {
-
-      errorMessage.value =
-        'Google login was cancelled.'
-
-    } else if (
-      error.code === 'auth/popup-blocked'
-    ) {
-
-      errorMessage.value =
-        'Your browser blocked the Google login popup.'
-
+      errorMessage.value = 'Google login was cancelled.'
+    } else if (error.code === 'auth/popup-blocked') {
+      errorMessage.value = 'Your browser blocked the Google login popup.'
     } else {
-
-      errorMessage.value =
-        'Google login failed. Please try again.'
-
+      errorMessage.value = 'Google login failed. Please try again.'
     }
-
   } finally {
-
     loading.value = false
-
   }
 }
 
+const goToSignup = () => {
+  router.push('/signup')
+}
 </script>
 
 
@@ -358,7 +267,7 @@ const googleLogin = async () => {
 
         <button
           class="link-button"
-          @click="createAccount"
+          @click="goToSignup"
           :disabled="loading"
         >
           Create account

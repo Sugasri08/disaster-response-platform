@@ -29,9 +29,9 @@ const selectRole = async (role) => {
       }
     )
 
-    // Move to the correct dashboard
+    // Move to the correct dashboard/onboarding
     if (role === 'volunteer') {
-      router.push('/volunteer')
+      router.push('/onboarding')
     } else {
       router.push('/crisis')
     }

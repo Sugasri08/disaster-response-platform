@@ -4,37 +4,60 @@ import {
   onMounted,
   ref
 } from 'vue'
-
 import { useRouter } from 'vue-router'
+import { signOut } from 'firebase/auth'
+import { doc, getDoc } from 'firebase/firestore'
+import { auth, db } from '../firebase/firebase'
 
 const router = useRouter()
 
 const email = ref('')
+const name = ref('')
 const role = ref('')
 const profile = ref(null)
+const loading = ref(true)
 
 onMounted(() => {
-
-  email.value =
-    localStorage.getItem(
-      'aidmap-user-email'
-    ) || 'User'
-
-  role.value =
-    localStorage.getItem(
-      'aidmap-role'
-    ) || 'requester'
-
-  const saved =
-    localStorage.getItem(
-      'aidmap-volunteer-profile'
-    )
-
-  if (saved) {
-    profile.value =
-      JSON.parse(saved)
+  const user = auth.currentUser
+  if (!user) {
+    setTimeout(() => {
+      const currentUser = auth.currentUser
+      if (!currentUser) {
+        router.push('/login')
+      } else {
+        loadUserProfile(currentUser)
+      }
+    }, 1000)
+  } else {
+    loadUserProfile(user)
   }
 })
+
+const loadUserProfile = async (user) => {
+  email.value = user.email || ''
+  name.value = user.displayName || ''
+  
+  try {
+    const userRef = doc(db, 'users', user.uid)
+    const snapshot = await getDoc(userRef)
+    if (snapshot.exists()) {
+      const data = snapshot.data()
+      name.value = data.name || user.displayName || ''
+      role.value = data.role || ''
+      if (data.role === 'volunteer') {
+        profile.value = {
+          skills: data.skills || [],
+          available: data.availability === 'available' || data.available === true,
+          radius: data.radius || 10
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load user profile:', error)
+  } finally {
+    loading.value = false
+  }
+}
 
 const skillNames = {
   medical: '🏥 Medical',
@@ -43,17 +66,13 @@ const skillNames = {
   shelter: '🏠 Shelter'
 }
 
-const logout = () => {
-
-  localStorage.removeItem(
-    'aidmap-user-email'
-  )
-
-  localStorage.removeItem(
-    'aidmap-role'
-  )
-
-  router.push('/login')
+const handleLogout = async () => {
+  try {
+    await signOut(auth)
+    router.push('/login')
+  } catch (error) {
+    console.error('Logout error:', error)
+  }
 }
 
 const home = computed(() => {
@@ -61,6 +80,7 @@ const home = computed(() => {
     ? '/volunteer'
     : '/crisis'
 })
+
 </script>
 
 <template>
@@ -92,7 +112,7 @@ const home = computed(() => {
         </div>
 
         <h1>
-          My Profile
+          {{ name || 'My Profile' }}
         </h1>
 
         <p class="email">
@@ -103,6 +123,8 @@ const home = computed(() => {
           {{
             role === 'volunteer'
               ? '🙋 Volunteer'
+              : role === 'help_seeker'
+              ? '🆘 Help Seeker'
               : '🆘 Requester'
           }}
         </div>
@@ -162,7 +184,7 @@ const home = computed(() => {
 
         <button
           class="logout"
-          @click="logout"
+          @click="handleLogout"
         >
           Sign out
         </button>

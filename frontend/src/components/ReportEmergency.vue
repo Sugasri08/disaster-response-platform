@@ -1,6 +1,8 @@
 <script setup>
 import { ref } from 'vue'
 import { createEmergency } from '../services/api'
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore'
+import { auth, db } from '../firebase/firebase'
 
 const emit = defineEmits([
   'close',
@@ -141,6 +143,32 @@ const submitEmergency = async () => {
 
     submitting.value = true
 
+    let docRef = null
+    const user = auth.currentUser
+    if (user) {
+      const severityMap = {
+        Low: 'Low',
+        Medium: 'Medium',
+        Critical: 'High'
+      }
+      docRef = await addDoc(collection(db, 'emergencies'), {
+        requesterId: user.uid,
+        requesterName: user.displayName || 'Help Seeker',
+        crisisId: 'default',
+        type: selectedType.value,
+        severity: severityMap[selectedPriority.value] || 'Low',
+        description: description.value.trim(),
+        address: null,
+        contact: null,
+        additionalInfo: null,
+        latitude: selectedLocation.value.latitude,
+        longitude: selectedLocation.value.longitude,
+        status: 'PENDING',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      })
+    }
+
     const emergency = {
       type: selectedType.value,
 
@@ -153,7 +181,9 @@ const submitEmergency = async () => {
         selectedLocation.value.latitude,
 
       longitude:
-        selectedLocation.value.longitude
+        selectedLocation.value.longitude,
+
+      firestoreId: docRef ? docRef.id : null
     }
 
     const response =

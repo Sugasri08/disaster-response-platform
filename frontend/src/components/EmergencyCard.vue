@@ -1,11 +1,14 @@
 <script setup>
 
 import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 
 import {
   acceptEmergency,
   resolveEmergency
 } from '../services/api'
+
+const router = useRouter()
 
 const props = defineProps({
   emergency: {
@@ -147,6 +150,20 @@ const focusMap = () => {
   )
 }
 
+const getRequiredSkill = (type) => {
+  const mapping = {
+    'Medical': 'Medical',
+    'Transport': 'Transport',
+    'Food/Supplies': 'Supplies',
+    'Food': 'Supplies',
+    'Power': 'Supplies',
+    'Water': 'Supplies',
+    'Shelter': 'Shelter',
+    'Rescue': 'Transport'
+  }
+  return mapping[type] || 'None'
+}
+
 const formatDate = (date) => {
 
   if (!date) {
@@ -235,6 +252,9 @@ const formatDate = (date) => {
             emergency.longitude
           ).toFixed(5)
         }}
+        <span v-if="emergency.distance !== undefined && emergency.distance !== null" style="color: #2563eb; font-weight: 700; margin-left: 5px;">
+          ({{ emergency.distance.toFixed(2) }} km)
+        </span>
       </span>
 
       <span class="map-link">
@@ -242,6 +262,10 @@ const formatDate = (date) => {
       </span>
 
     </button>
+
+    <div class="skill-required" style="margin: 8px 0; font-size: 11px; color: #475569;">
+      🛠️ Required Skill: <strong style="color: #0f172a;">{{ getRequiredSkill(emergency.type) }}</strong>
+    </div>
 
 
     <div class="status-row">
@@ -278,12 +302,12 @@ const formatDate = (date) => {
 
       <span
         v-if="
-          emergency.assignedVolunteer
+          emergency.assignedVolunteer || emergency.assignedVolunteerName
         "
         class="volunteer"
       >
         👤
-        {{ emergency.assignedVolunteer }}
+        {{ emergency.assignedVolunteerName || emergency.assignedVolunteer }}
       </span>
 
     </div>
@@ -296,16 +320,9 @@ const formatDate = (date) => {
           emergency.status === 'pending'
         "
         class="accept"
-        :disabled="processing"
-        @click="handleAccept"
+        @click="router.push('/emergency/' + (emergency.firestoreId || emergency._id))"
       >
-
-        {{
-          processing
-            ? 'Processing...'
-            : '🙋 I CAN HELP'
-        }}
-
+        📋 VIEW DETAILS
       </button>
 
 

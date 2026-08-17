@@ -45,7 +45,17 @@ const skillOptions = [
 ]
 
 const loadProfile = async () => {
-  const user = auth.currentUser
+  let user = auth.currentUser
+  if (!user) {
+    await new Promise((resolve) => {
+      const unsubscribe = auth.onAuthStateChanged((u) => {
+        user = u
+        unsubscribe()
+        resolve()
+      })
+      setTimeout(resolve, 1000)
+    })
+  }
 
   if (!user) {
     router.push('/login')
@@ -124,6 +134,10 @@ const saveProfile = async () => {
     )
 
     message.value = 'Profile saved successfully!'
+
+    setTimeout(() => {
+      router.push('/volunteer')
+    }, 1200)
 
   } catch (error) {
     console.error(error)

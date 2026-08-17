@@ -38,12 +38,14 @@ export const createEmergency = async (emergency) => {
 
 export const acceptEmergency = async (
   emergencyId,
-  volunteerId
+  volunteerId,
+  assignedVolunteerName
 ) => {
   const response = await api.patch(
     `/emergencies/${emergencyId}/accept`,
     {
-      volunteerId
+      volunteerId,
+      assignedVolunteerName
     }
   )
 

@@ -1,6 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { doc, setDoc } from 'firebase/firestore'
 
 import {
   createUserWithEmailAndPassword,
@@ -9,7 +10,7 @@ import {
   signInWithPopup
 } from 'firebase/auth'
 
-import { auth } from '../firebase/firebase'
+import { auth, db } from '../firebase/firebase'
 
 const router = useRouter()
 
@@ -17,6 +18,7 @@ const name = ref('')
 const email = ref('')
 const password = ref('')
 const confirmPassword = ref('')
+const role = ref('help_seeker')
 
 const loading = ref(false)
 const errorMessage = ref('')
@@ -44,15 +46,27 @@ const signup = async () => {
   try {
     const userCredential = await createUserWithEmailAndPassword(
       auth,
-      email.value,
+      email.value.trim(),
       password.value
     )
 
     await updateProfile(userCredential.user, {
-      displayName: name.value
+      displayName: name.value.trim()
     })
 
-    router.push('/role-selection')
+    // Save profile and role to Firestore
+    await setDoc(doc(db, 'users', userCredential.user.uid), {
+      name: name.value.trim(),
+      email: email.value.trim(),
+      role: role.value,
+      createdAt: new Date()
+    })
+
+    if (role.value === 'volunteer') {
+      router.push('/onboarding')
+    } else {
+      router.push('/crisis')
+    }
   } catch (error) {
     console.error(error)
 
@@ -86,7 +100,8 @@ const googleSignup = async () => {
 
     await signInWithPopup(auth, provider)
 
-    router.push('/role-selection')
+    // Redirect to onboarding/role selection since Google doesn't choose a role beforehand
+    router.push('/onboarding')
   } catch (error) {
     console.error(error)
 
@@ -103,6 +118,7 @@ const googleSignup = async () => {
 const goToLogin = () => {
   router.push('/login')
 }
+
 </script>
 
 <template>
@@ -164,6 +180,18 @@ const goToLogin = () => {
           placeholder="Re-enter your password"
           :disabled="loading"
         />
+
+        <label>I want to join as</label>
+        <div class="role-selector">
+          <label class="role-radio" :class="{ selected: role === 'help_seeker' }">
+            <input type="radio" value="help_seeker" v-model="role" :disabled="loading" />
+            <span>🆘 Help Seeker</span>
+          </label>
+          <label class="role-radio" :class="{ selected: role === 'volunteer' }">
+            <input type="radio" value="volunteer" v-model="role" :disabled="loading" />
+            <span>🙋 Volunteer</span>
+          </label>
+        </div>
 
         <button
           class="primary-button"
@@ -341,5 +369,40 @@ input:disabled {
 
 .link-button:disabled {
   opacity: .6;
+}
+
+.role-selector {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 5px;
+}
+
+.role-radio {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 9px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+  background: white;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.role-radio input {
+  width: auto;
+  margin: 0;
+  cursor: pointer;
+}
+
+.role-radio.selected {
+  border-color: #dc2626;
+  background: #fff7f7;
+  color: #b91c1c;
 }
 </style>

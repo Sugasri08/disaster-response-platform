@@ -54,6 +54,16 @@ const emergencySchema = new mongoose.Schema(
     assignedVolunteer: {
       type: String,
       default: null
+    },
+
+    assignedVolunteerName: {
+      type: String,
+      default: null
+    },
+
+    firestoreId: {
+      type: String,
+      default: null
     }
   },
   {
@@ -630,28 +640,6 @@ app.patch(
 
 
       // -------------------------------
-      // CHECK MONGODB ID
-      // -------------------------------
-
-      if (
-        !mongoose.Types.ObjectId.isValid(
-          id
-        )
-      ) {
-
-        return res.status(400).json({
-
-          success: false,
-
-          message:
-            'Invalid emergency ID'
-
-        })
-
-      }
-
-
-      // -------------------------------
       // CHECK VOLUNTEER EXISTS
       // -------------------------------
 
@@ -697,11 +685,14 @@ app.patch(
       // FIND EMERGENCY
       // -------------------------------
 
+      const isMongoId = mongoose.Types.ObjectId.isValid(id)
+      const searchQuery = isMongoId ? { _id: id } : { firestoreId: id }
+
       const emergency =
         await Emergency.findOneAndUpdate(
 
           {
-            _id: id,
+            ...searchQuery,
 
             status:
               'pending'
@@ -714,7 +705,10 @@ app.patch(
                 'accepted',
 
               assignedVolunteer:
-                volunteerId
+                volunteerId,
+
+              assignedVolunteerName:
+                req.body.assignedVolunteerName || 'Volunteer'
 
             }
           },
