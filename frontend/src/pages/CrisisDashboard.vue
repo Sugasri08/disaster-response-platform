@@ -1,12 +1,21 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { logout } from '../utils/auth'
 
 import DisasterMap from '../components/DisasterMap.vue'
 import CrisisBanner from '../components/CrisisBanner.vue'
 import ReportEmergency from '../components/ReportEmergency.vue'
 
 const router = useRouter()
+const handleLogout = async () => {
+  try {
+    await logout()
+    router.push('/login')
+  } catch {
+    alert('Unable to logout. Please try again.')
+  }
+}
 
 const showReport = ref(false)
 const focusLocation = ref(null)
@@ -58,6 +67,12 @@ const closeReport = () => {
         >
           🙋 Volunteer
         </button>
+        <button
+  class="logout"
+  @click="handleLogout"
+>
+  🚪 Logout
+</button>
 
       </div>
 
@@ -119,7 +134,19 @@ header {
   padding: 0 25px;
   z-index: 1000;
 }
+.logout {
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+  padding: 10px 14px;
+  border-radius: 9px;
+  cursor: pointer;
+  font-weight: 600;
+}
 
+.logout:hover {
+  background: #fee2e2;
+}
 .brand {
   display: flex;
   gap: 10px;
