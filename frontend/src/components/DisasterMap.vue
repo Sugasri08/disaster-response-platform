@@ -1,21 +1,24 @@
 <script setup>
+
 import {
   onMounted,
   onBeforeUnmount,
-  ref,
-  watch
+  watch,
+  ref
 } from 'vue'
 
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
-/* =========================
-   LEAFLET DEFAULT ICON FIX
-========================= */
+
+/* =========================================================
+   LEAFLET ICON FIX
+========================================================= */
 
 delete L.Icon.Default.prototype._getIconUrl
 
 L.Icon.Default.mergeOptions({
+
   iconRetinaUrl:
     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
 
@@ -24,13 +27,16 @@ L.Icon.Default.mergeOptions({
 
   shadowUrl:
     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png'
+
 })
 
-/* =========================
+
+/* =========================================================
    PROPS
-========================= */
+========================================================= */
 
 const props = defineProps({
+
   emergencies: {
     type: Array,
     default: () => []
@@ -45,11 +51,13 @@ const props = defineProps({
     type: String,
     default: ''
   }
+
 })
 
-/* =========================
+
+/* =========================================================
    EVENTS
-========================= */
+========================================================= */
 
 const emit = defineEmits([
   'location-selected',
@@ -57,45 +65,86 @@ const emit = defineEmits([
   'accept-emergency'
 ])
 
-/* =========================
+
+/* =========================================================
    MAP STATE
-========================= */
+========================================================= */
 
 const mapContainer = ref(null)
 
 let map = null
+
 let selectedMarker = null
+
 let emergencyLayer = null
 
-/* =========================
+let userLocationMarker = null
+
+let userLocationCircle = null
+
+
+/* =========================================================
+   DEFAULT MAP VIEW
+========================================================= */
+
+/*
+ * This is ONLY a temporary world view.
+ *
+ * It is NOT a hardcoded user location.
+ *
+ * The map will immediately move to the user's
+ * real browser location when available.
+ */
+
+const DEFAULT_MAP_CENTER = [
+  20,
+  0
+]
+
+const DEFAULT_ZOOM = 2
+
+
+/* =========================================================
    MOUNT
-========================= */
+========================================================= */
 
 onMounted(() => {
+
   initializeMap()
 
-  /*
-   * If emergencies are already
-   * available when component loads.
-   */
-  displayEmergencies(props.emergencies)
 })
 
-/* =========================
+
+/* =========================================================
    INITIALIZE MAP
-========================= */
+========================================================= */
 
 const initializeMap = () => {
+
   if (!mapContainer.value) {
     return
   }
 
-  map = L.map(mapContainer.value).setView(
-    [12.8260, 80.2333],
-    12
-  )
 
-  /* OpenStreetMap */
+  /*
+   * Start with a neutral world view.
+   *
+   * This prevents the application from pretending
+   * that the user is at a hardcoded location.
+   */
+
+  map =
+    L.map(
+      mapContainer.value
+    ).setView(
+      DEFAULT_MAP_CENTER,
+      DEFAULT_ZOOM
+    )
+
+
+  /* -------------------------------------------------------
+     OPENSTREETMAP
+  ------------------------------------------------------- */
 
   L.tileLayer(
     'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -107,181 +156,574 @@ const initializeMap = () => {
     }
   ).addTo(map)
 
-  /* Emergency marker layer */
+
+  /* -------------------------------------------------------
+     EMERGENCY LAYER
+  ------------------------------------------------------- */
 
   emergencyLayer =
     L.layerGroup().addTo(map)
 
-  /* User map click */
+
+  /* -------------------------------------------------------
+     MAP CLICK
+  ------------------------------------------------------- */
 
   map.on(
     'click',
     handleMapClick
   )
 
-  /*
-   * IMPORTANT:
-   * Leaflet popups contain HTML generated
-   * outside Vue's template system.
-   *
-   * Therefore we listen for popupopen
-   * directly on the map.
-   */
+
+  /* -------------------------------------------------------
+     POPUP
+  ------------------------------------------------------- */
 
   map.on(
     'popupopen',
     handlePopupOpen
   )
 
+
+  /* -------------------------------------------------------
+     INITIAL DATA
+  ------------------------------------------------------- */
+
+  displayEmergencies(
+    props.emergencies || []
+  )
+
+
   /*
-   * Leaflet sometimes calculates its
-   * dimensions before the parent layout
-   * has completely rendered.
+   * If parent already knows user's location,
+   * immediately use it.
    */
 
+  if (
+    props.focusLocation &&
+    isValidLocation(
+      props.focusLocation
+    )
+  ) {
+
+    updateUserLocation(
+      props.focusLocation.latitude,
+      props.focusLocation.longitude
+    )
+
+  }
+  else {
+
+    /*
+     * Otherwise ask browser for location.
+     */
+
+    requestBrowserLocation()
+
+  }
+
+
+  /* -------------------------------------------------------
+     MAP SIZE
+  ------------------------------------------------------- */
+
   setTimeout(() => {
+
     if (map) {
       map.invalidateSize()
     }
+
   }, 300)
+
+
+  setTimeout(() => {
+
+    if (map) {
+      map.invalidateSize()
+    }
+
+  }, 1000)
+
 }
 
-/* =========================
-   EMERGENCIES WATCHER
-========================= */
 
-watch(
-  () => props.emergencies,
+/* =========================================================
+   BROWSER GEOLOCATION
+========================================================= */
 
-  (emergencies) => {
-    if (!map || !emergencyLayer) {
-      return
-    }
+const requestBrowserLocation = () => {
 
-    displayEmergencies(
-      emergencies || []
+  if (!navigator.geolocation) {
+
+    console.warn(
+      'Browser does not support geolocation.'
     )
-  },
 
-  {
-    deep: true,
-    immediate: true
+    return
+
   }
-)
 
-/* =========================
-   FOCUS LOCATION WATCHER
-========================= */
 
-watch(
-  () => props.focusLocation,
+  navigator.geolocation.getCurrentPosition(
 
-  (location) => {
-    if (!location || !map) {
-      return
-    }
+    position => {
 
-    const latitude =
-      Number(location.latitude)
+      const latitude =
+        Number(
+          position.coords.latitude
+        )
 
-    const longitude =
-      Number(location.longitude)
+      const longitude =
+        Number(
+          position.coords.longitude
+        )
 
-    if (
-      !Number.isFinite(latitude) ||
-      !Number.isFinite(longitude)
-    ) {
-      return
-    }
 
-    map.flyTo(
-      [latitude, longitude],
-      15,
-      {
-        duration: 1
+      if (
+        !Number.isFinite(latitude) ||
+        !Number.isFinite(longitude)
+      ) {
+
+        return
+
       }
-    )
 
-    /*
-     * Replace selected marker
-     */
 
-    if (selectedMarker) {
-      map.removeLayer(
-        selectedMarker
-      )
-    }
-
-    selectedMarker =
-      L.marker([
+      console.log(
+        '📍 DisasterMap browser location:',
         latitude,
         longitude
-      ]).addTo(map)
+      )
 
-    selectedMarker
-      .bindPopup(`
-        <div style="min-width:180px;">
-          <strong>
-            📍 Selected Location
-          </strong>
 
-          <br><br>
+      /*
+       * Update map.
+       */
 
-          Latitude:
-          ${latitude.toFixed(6)}
+      updateUserLocation(
+        latitude,
+        longitude
+      )
 
-          <br>
 
-          Longitude:
-          ${longitude.toFixed(6)}
-        </div>
-      `)
-      .openPopup()
-  },
+      /*
+       * Tell parent about the real location.
+       */
 
-  {
-    deep: true
+      emit(
+        'location-selected',
+        {
+          latitude,
+          longitude
+        }
+      )
+
+    },
+
+
+    error => {
+
+      console.warn(
+        'Unable to get browser location:',
+        error
+      )
+
+    },
+
+
+    {
+      enableHighAccuracy: true,
+
+      timeout: 15000,
+
+      maximumAge: 0
+
+    }
+
+  )
+
+}
+
+
+/* =========================================================
+   VALIDATE LOCATION
+========================================================= */
+
+const isValidLocation = location => {
+
+  if (!location) {
+    return false
   }
-)
 
-/* =========================
-   MAP CLICK
-========================= */
 
-const handleMapClick = (event) => {
+  const latitude =
+    Number(
+      location.latitude
+    )
+
+
+  const longitude =
+    Number(
+      location.longitude
+    )
+
+
+  return (
+
+    Number.isFinite(latitude) &&
+
+    Number.isFinite(longitude) &&
+
+    latitude >= -90 &&
+
+    latitude <= 90 &&
+
+    longitude >= -180 &&
+
+    longitude <= 180
+
+  )
+
+}
+
+
+/* =========================================================
+   UPDATE USER LOCATION
+========================================================= */
+
+const updateUserLocation = (
+  latitude,
+  longitude
+) => {
+
   if (!map) {
     return
   }
 
+
+  latitude =
+    Number(latitude)
+
+  longitude =
+    Number(longitude)
+
+
+  if (
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude)
+  ) {
+
+    return
+
+  }
+
+
+  /*
+   * Remove old user marker.
+   */
+
+  if (userLocationMarker) {
+
+    map.removeLayer(
+      userLocationMarker
+    )
+
+  }
+
+
+  if (userLocationCircle) {
+
+    map.removeLayer(
+      userLocationCircle
+    )
+
+  }
+
+
+  /*
+   * Blue user location marker.
+   */
+
+  userLocationMarker =
+    L.circleMarker(
+      [
+        latitude,
+        longitude
+      ],
+      {
+
+        radius: 9,
+
+        fillColor: '#2563eb',
+
+        color: '#ffffff',
+
+        weight: 3,
+
+        opacity: 1,
+
+        fillOpacity: 1
+
+      }
+    ).addTo(map)
+
+
+  userLocationMarker.bindPopup(`
+
+    <div style="
+      min-width:180px;
+      text-align:center;
+    ">
+
+      <strong>
+        📍 Your Current Location
+      </strong>
+
+      <br><br>
+
+      <span style="
+        color:#475569;
+        font-size:12px;
+      ">
+
+        ${latitude.toFixed(6)},
+        ${longitude.toFixed(6)}
+
+      </span>
+
+    </div>
+
+  `)
+
+
+  /*
+   * Accuracy-style circle.
+   *
+   * This is visual only and doesn't claim
+   * an exact accuracy value.
+   */
+
+  userLocationCircle =
+    L.circle(
+      [
+        latitude,
+        longitude
+      ],
+      {
+
+        radius: 80,
+
+        color: '#2563eb',
+
+        weight: 1,
+
+        fillColor: '#2563eb',
+
+        fillOpacity: 0.08
+
+      }
+    ).addTo(map)
+
+
+  /*
+   * Move map to user's location.
+   */
+
+  map.flyTo(
+    [
+      latitude,
+      longitude
+    ],
+    15,
+    {
+      duration: 1.2
+    }
+  )
+
+}
+
+
+/* =========================================================
+   WATCH EMERGENCIES
+========================================================= */
+
+watch(
+
+  () => props.emergencies,
+
+  emergencies => {
+
+    if (
+      !map ||
+      !emergencyLayer
+    ) {
+
+      return
+
+    }
+
+
+    displayEmergencies(
+      emergencies || []
+    )
+
+  },
+
+  {
+    deep: true,
+
+    immediate: true
+
+  }
+
+)
+
+
+/* =========================================================
+   WATCH FOCUS LOCATION
+========================================================= */
+
+watch(
+
+  () => props.focusLocation,
+
+  location => {
+
+    if (
+      !location ||
+      !map
+    ) {
+
+      return
+
+    }
+
+
+    if (
+      !isValidLocation(location)
+    ) {
+
+      return
+
+    }
+
+
+    const latitude =
+      Number(
+        location.latitude
+      )
+
+
+    const longitude =
+      Number(
+        location.longitude
+      )
+
+
+    /*
+     * Update blue user/selected marker.
+     */
+
+    updateUserLocation(
+      latitude,
+      longitude
+    )
+
+  },
+
+  {
+    deep: true,
+
+    immediate: true
+
+  }
+
+)
+
+
+/* =========================================================
+   MAP CLICK
+========================================================= */
+
+const handleMapClick = event => {
+
+  if (!map) {
+    return
+  }
+
+
   const latitude =
     event.latlng.lat
+
 
   const longitude =
     event.latlng.lng
 
+
   /*
-   * Remove previous selected marker
+   * Show selected location.
    */
 
+  setSelectedMarker(
+    latitude,
+    longitude
+  )
+
+
+  /*
+   * Tell parent.
+   */
+
+  emit(
+    'location-selected',
+    {
+      latitude,
+      longitude
+    }
+  )
+
+}
+
+
+/* =========================================================
+   SELECTED LOCATION MARKER
+========================================================= */
+
+const setSelectedMarker = (
+  latitude,
+  longitude
+) => {
+
+  if (!map) {
+    return
+  }
+
+
   if (selectedMarker) {
+
     map.removeLayer(
       selectedMarker
     )
+
   }
 
-  /*
-   * Create new selected marker
-   */
 
   selectedMarker =
-    L.marker([
-      latitude,
-      longitude
-    ]).addTo(map)
+    L.marker(
+      [
+        latitude,
+        longitude
+      ]
+    ).addTo(map)
+
 
   selectedMarker
     .bindPopup(`
-      <div style="min-width:180px;">
+
+      <div style="
+        min-width:180px;
+      ">
+
         <strong>
           📍 Selected Location
         </strong>
@@ -295,159 +737,149 @@ const handleMapClick = (event) => {
 
         Longitude:
         ${longitude.toFixed(6)}
+
       </div>
+
     `)
     .openPopup()
 
-  /*
-   * Tell parent component
-   */
-
-  emit(
-    'location-selected',
-    {
-      latitude,
-      longitude
-    }
-  )
 }
 
-/* =========================
-   DISPLAY EMERGENCIES
-========================= */
 
-const displayEmergencies = (
-  emergencies
-) => {
-  if (!emergencyLayer) {
-    return
+/* =========================================================
+   DISPLAY EMERGENCIES
+========================================================= */
+
+const displayEmergencies =
+  emergencies => {
+
+    if (!emergencyLayer) {
+      return
+    }
+
+
+    emergencyLayer.clearLayers()
+
+
+    emergencies.forEach(
+      emergency => {
+
+        if (
+          emergency.latitude == null ||
+          emergency.longitude == null
+        ) {
+
+          return
+
+        }
+
+
+        const latitude =
+          Number(
+            emergency.latitude
+          )
+
+
+        const longitude =
+          Number(
+            emergency.longitude
+          )
+
+
+        if (
+          !Number.isFinite(latitude) ||
+          !Number.isFinite(longitude)
+        ) {
+
+          return
+
+        }
+
+
+        const status =
+          normalizeStatus(
+            emergency.status
+          )
+
+
+        const priority =
+          emergency.priority ||
+          emergency.severity ||
+          'Low'
+
+
+        const color =
+          getPriorityColor(
+            priority,
+            status
+          )
+
+
+        const resolved =
+          status === 'RESOLVED'
+
+
+        const marker =
+          L.circleMarker(
+            [
+              latitude,
+              longitude
+            ],
+            {
+
+              radius:
+                resolved
+                  ? 7
+                  : 11,
+
+              fillColor:
+                color,
+
+              color:
+                '#ffffff',
+
+              weight:
+                3,
+
+              opacity:
+                1,
+
+              fillOpacity:
+                resolved
+                  ? 0.55
+                  : 0.9
+
+            }
+          )
+
+
+        marker.bindPopup(
+          createPopup(
+            emergency,
+            color
+          )
+        )
+
+
+        marker.addTo(
+          emergencyLayer
+        )
+
+      }
+    )
+
+
+    emit(
+      'emergencies-updated',
+      emergencies
+    )
+
   }
 
-  /*
-   * Remove old markers
-   */
 
-  emergencyLayer.clearLayers()
-
-  emergencies.forEach(
-    (emergency) => {
-
-      /*
-       * Validate coordinates
-       */
-
-      if (
-        emergency.latitude == null ||
-        emergency.longitude == null
-      ) {
-        return
-      }
-
-      const latitude =
-        Number(emergency.latitude)
-
-      const longitude =
-        Number(emergency.longitude)
-
-      if (
-        !Number.isFinite(latitude) ||
-        !Number.isFinite(longitude)
-      ) {
-        return
-      }
-
-      /*
-       * Normalize status
-       */
-
-      const status =
-        normalizeStatus(
-          emergency.status
-        )
-
-      /*
-       * Priority
-       */
-
-      const priority =
-        emergency.priority ||
-        emergency.severity ||
-        'Low'
-
-      /*
-       * Marker color
-       */
-
-      const color =
-        getPriorityColor(
-          priority,
-          status
-        )
-
-      /*
-       * Resolved emergencies
-       * get a smaller marker.
-       */
-
-      const isResolved =
-        status === 'RESOLVED'
-
-      const marker =
-        L.circleMarker(
-          [
-            latitude,
-            longitude
-          ],
-          {
-            radius:
-              isResolved
-                ? 7
-                : 11,
-
-            fillColor:
-              color,
-
-            color:
-              '#ffffff',
-
-            weight:
-              3,
-
-            opacity:
-              1,
-
-            fillOpacity:
-              isResolved
-                ? 0.55
-                : 0.9
-          }
-        )
-
-      /*
-       * Popup
-       */
-
-      marker.bindPopup(
-        createPopup(
-          emergency,
-          color
-        )
-      )
-
-      /*
-       * Add marker
-       */
-
-      marker.addTo(
-        emergencyLayer
-      )
-    }
-  )
-}
-
-/* =========================
+/* =========================================================
    CREATE POPUP
-========================= */
+========================================================= */
 
 const createPopup = (
   emergency,
@@ -459,14 +891,12 @@ const createPopup = (
       emergency.status
     )
 
-  const priority =
-    priorityText(
-      emergency
-    )
 
-  const volunteerName =
-    emergency.assignedVolunteerName ||
-    emergency.assignedVolunteer
+  const priority =
+    emergency.priority ||
+    emergency.severity ||
+    'Low'
+
 
   const emergencyId =
     emergency.firestoreId ||
@@ -474,37 +904,51 @@ const createPopup = (
     emergency.id ||
     ''
 
-  /*
-   * Location
-   */
+
+  const volunteerName =
+    emergency.assignedVolunteerName ||
+    emergency.assignedVolunteer ||
+    ''
+
 
   const latitude =
-    Number(emergency.latitude)
+    Number(
+      emergency.latitude
+    )
+
 
   const longitude =
-    Number(emergency.longitude)
+    Number(
+      emergency.longitude
+    )
 
-  /*
-   * Google Maps directions
-   */
 
-  const mapsUrl =
-    Number.isFinite(latitude) &&
-    Number.isFinite(longitude)
+  const contact =
+    emergency.contact ||
+    emergency.phone ||
+    emergency.contactNumber ||
+    ''
 
-      ? `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`
 
-      : '#'
+  const address =
+    emergency.address ||
+    emergency.locationAddress ||
+    ''
 
-  /*
-   * Status content
-   */
 
   let statusContent = ''
 
-  if (status === 'PENDING') {
+
+  /* -------------------------------------------------------
+     PENDING
+  ------------------------------------------------------- */
+
+  if (
+    status === 'PENDING'
+  ) {
 
     statusContent = `
+
       <div style="
         margin-top:10px;
         padding:8px;
@@ -515,13 +959,13 @@ const createPopup = (
         font-weight:600;
         font-size:12px;
       ">
+
         ⏳ Waiting for a volunteer
+
       </div>
+
     `
 
-    /*
-     * Volunteer can accept
-     */
 
     if (
       props.volunteerId &&
@@ -529,9 +973,12 @@ const createPopup = (
     ) {
 
       statusContent += `
+
         <button
           class="aidmap-accept-button"
-          data-emergency-id="${escapeHtml(emergencyId)}"
+          data-emergency-id="${escapeHtml(
+            emergencyId
+          )}"
           style="
             width:100%;
             margin-top:10px;
@@ -545,16 +992,28 @@ const createPopup = (
             font-size:13px;
           "
         >
+
           🙋 I Can Help
+
         </button>
+
       `
+
     }
 
-  } else if (
+  }
+
+
+  /* -------------------------------------------------------
+     ACCEPTED
+  ------------------------------------------------------- */
+
+  else if (
     status === 'ACCEPTED'
   ) {
 
     statusContent = `
+
       <div style="
         margin-top:10px;
         padding:8px;
@@ -565,15 +1024,26 @@ const createPopup = (
         font-weight:600;
         font-size:12px;
       ">
+
         🙋 Help is on the way
+
       </div>
+
     `
 
-  } else if (
+  }
+
+
+  /* -------------------------------------------------------
+     IN PROGRESS
+  ------------------------------------------------------- */
+
+  else if (
     status === 'IN_PROGRESS'
   ) {
 
     statusContent = `
+
       <div style="
         margin-top:10px;
         padding:8px;
@@ -584,15 +1054,26 @@ const createPopup = (
         font-weight:600;
         font-size:12px;
       ">
+
         🚑 Response in progress
+
       </div>
+
     `
 
-  } else if (
+  }
+
+
+  /* -------------------------------------------------------
+     RESOLVED
+  ------------------------------------------------------- */
+
+  else if (
     status === 'RESOLVED'
   ) {
 
     statusContent = `
+
       <div style="
         margin-top:10px;
         padding:8px;
@@ -603,13 +1084,20 @@ const createPopup = (
         font-weight:600;
         font-size:12px;
       ">
+
         ✅ Resolved
+
       </div>
+
     `
 
-  } else {
+  }
+
+
+  else {
 
     statusContent = `
+
       <div style="
         margin-top:10px;
         padding:8px;
@@ -620,99 +1108,144 @@ const createPopup = (
         font-weight:600;
         font-size:12px;
       ">
+
         ${escapeHtml(status)}
+
       </div>
+
     `
+
   }
 
-  /*
-   * Volunteer information
-   */
+
+  /* -------------------------------------------------------
+     CONTACT
+  ------------------------------------------------------- */
+
+  const contactContent =
+    contact
+      ? `
+
+        <div style="
+          margin-top:7px;
+          font-size:12px;
+          color:#475569;
+        ">
+
+          📞
+          ${escapeHtml(contact)}
+
+        </div>
+
+      `
+      : ''
+
+
+  /* -------------------------------------------------------
+     ADDRESS
+  ------------------------------------------------------- */
+
+  const addressContent =
+    address
+      ? `
+
+        <div style="
+          margin-top:7px;
+          font-size:12px;
+          color:#475569;
+          line-height:1.4;
+        ">
+
+          🏠
+          ${escapeHtml(address)}
+
+        </div>
+
+      `
+      : ''
+
+
+  /* -------------------------------------------------------
+     VOLUNTEER
+  ------------------------------------------------------- */
 
   const volunteerContent =
     volunteerName
       ? `
+
         <div style="
           margin-top:8px;
           color:#6b7280;
           font-size:12px;
         ">
+
           👤 Volunteer:
+
           <strong>
+
             ${escapeHtml(
               volunteerName
             )}
+
           </strong>
+
         </div>
+
       `
       : ''
 
-  /*
-   * Additional contact
-   */
 
-  const contact =
-    emergency.contact ||
-    emergency.phone ||
-    emergency.contactNumber ||
-    ''
+  /* -------------------------------------------------------
+     DIRECTIONS
+  ------------------------------------------------------- */
 
-  const contactContent =
-    contact
+  const directions =
+    Number.isFinite(latitude) &&
+    Number.isFinite(longitude)
+
       ? `
-        <div style="
-          margin-top:6px;
-          font-size:12px;
-          color:#475569;
-        ">
-          📞
-          ${escapeHtml(
-            contact
-          )}
-        </div>
+
+        <a
+          href="https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}"
+          target="_blank"
+          rel="noopener noreferrer"
+          style="
+            display:block;
+            margin-top:10px;
+            padding:8px;
+            border-radius:7px;
+            background:#eff6ff;
+            color:#1d4ed8;
+            text-decoration:none;
+            text-align:center;
+            font-weight:700;
+            font-size:12px;
+          "
+        >
+
+          🗺️ Get Directions
+
+        </a>
+
       `
+
       : ''
 
-  /*
-   * Address
-   */
-
-  const address =
-    emergency.address ||
-    emergency.locationAddress ||
-    ''
-
-  const addressContent =
-    address
-      ? `
-        <div style="
-          margin-top:6px;
-          font-size:12px;
-          color:#475569;
-        ">
-          🏠
-          ${escapeHtml(
-            address
-          )}
-        </div>
-      `
-      : ''
 
   return `
-    <div
-      style="
-        min-width:230px;
-        max-width:280px;
-      "
-    >
 
-      <!-- TITLE -->
+    <div style="
+      min-width:230px;
+      max-width:280px;
+    ">
+
 
       <h3 style="
         margin:0 0 10px;
         font-size:16px;
         color:#0f172a;
       ">
+
         ${getIcon(
           emergency.type
         )}
@@ -721,14 +1254,14 @@ const createPopup = (
           emergency.type ||
           'Emergency'
         )}
+
       </h3>
 
-      <!-- PRIORITY -->
 
       <div style="
         margin-bottom:6px;
-        font-weight:600;
         font-size:12px;
+        font-weight:600;
       ">
 
         Priority:
@@ -737,14 +1270,13 @@ const createPopup = (
           color:${color};
           font-weight:800;
         ">
-          ${escapeHtml(
-            priority
-          )}
+
+          ${escapeHtml(priority)}
+
         </span>
 
       </div>
 
-      <!-- STATUS -->
 
       <div style="
         margin-bottom:8px;
@@ -754,14 +1286,13 @@ const createPopup = (
         Status:
 
         <strong>
-          ${escapeHtml(
-            status
-          )}
+
+          ${escapeHtml(status)}
+
         </strong>
 
       </div>
 
-      <!-- DESCRIPTION -->
 
       <p style="
         margin:8px 0;
@@ -769,143 +1300,114 @@ const createPopup = (
         font-size:13px;
         line-height:1.4;
       ">
+
         ${escapeHtml(
           emergency.description ||
           'No description provided.'
         )}
+
       </p>
 
-      <!-- ADDRESS -->
 
       ${addressContent}
 
-      <!-- CONTACT -->
-
       ${contactContent}
 
-      <!-- COORDINATES -->
 
       <div style="
         margin-top:8px;
         font-size:11px;
         color:#6b7280;
       ">
+
         📍
+
         ${latitudeText(
           emergency.latitude
         )},
+
         ${longitudeText(
           emergency.longitude
         )}
+
       </div>
 
-      <!-- VOLUNTEER -->
 
       ${volunteerContent}
 
-      <!-- DIRECTIONS -->
-
-      ${
-        Number.isFinite(
-          latitude
-        ) &&
-        Number.isFinite(
-          longitude
-        )
-          ? `
-            <a
-              href="${mapsUrl}"
-              target="_blank"
-              rel="noopener noreferrer"
-              style="
-                display:block;
-                margin-top:10px;
-                padding:8px;
-                border-radius:7px;
-                background:#eff6ff;
-                color:#1d4ed8;
-                text-decoration:none;
-                text-align:center;
-                font-weight:700;
-                font-size:12px;
-              "
-            >
-              🗺️ Get Directions
-            </a>
-          `
-          : ''
-      }
-
-      <!-- STATUS ACTION -->
+      ${directions}
 
       ${statusContent}
 
+
     </div>
+
   `
+
 }
 
-/* =========================
-   POPUP OPEN
-========================= */
 
-const handlePopupOpen = (
-  event
-) => {
+/* =========================================================
+   POPUP OPEN
+========================================================= */
+
+const handlePopupOpen = event => {
 
   const popupElement =
     event.popup.getElement()
+
 
   if (!popupElement) {
     return
   }
 
-  /*
-   * Avoid adding duplicate listeners
-   */
 
   popupElement.addEventListener(
     'click',
     handlePopupClick
   )
+
 }
 
-/* =========================
-   POPUP BUTTON CLICK
-========================= */
 
-const handlePopupClick = (
-  event
-) => {
+/* =========================================================
+   POPUP CLICK
+========================================================= */
+
+const handlePopupClick = event => {
 
   const target =
     event.target
 
+
   if (
     !(target instanceof Element)
   ) {
+
     return
+
   }
+
 
   const button =
     target.closest(
       '.aidmap-accept-button'
     )
 
+
   if (!button) {
     return
   }
 
+
   const emergencyId =
     button.dataset.emergencyId
+
 
   if (!emergencyId) {
     return
   }
 
-  /*
-   * Disable button immediately
-   * to prevent double clicking.
-   */
 
   button.disabled = true
 
@@ -915,19 +1417,20 @@ const handlePopupClick = (
   button.style.opacity =
     '0.7'
 
+
   emit(
     'accept-emergency',
     emergencyId
   )
+
 }
 
-/* =========================
-   NORMALIZE STATUS
-========================= */
 
-const normalizeStatus = (
-  status
-) => {
+/* =========================================================
+   STATUS
+========================================================= */
+
+const normalizeStatus = status => {
 
   return String(
     status || 'PENDING'
@@ -936,79 +1439,13 @@ const normalizeStatus = (
     .toUpperCase()
     .replace(/-/g, '_')
     .replace(/\s+/g, '_')
+
 }
 
-/* =========================
-   PRIORITY TEXT
-========================= */
 
-const priorityText = (
-  emergency
-) => {
-
-  return (
-    emergency.priority ||
-    emergency.severity ||
-    'Low'
-  )
-}
-
-/* =========================
-   ICONS
-========================= */
-
-const getIcon = (
-  type
-) => {
-
-  const icons = {
-
-    'Potable Water':
-      '💧',
-
-    'Medical Aid':
-      '🚑',
-
-    'Search & Rescue':
-      '🛟',
-
-    Shelter:
-      '🏠',
-
-    Water:
-      '💧',
-
-    Medical:
-      '🏥',
-
-    Rescue:
-      '🛟',
-
-    Transport:
-      '🚗',
-
-    'Food/Supplies':
-      '📦',
-
-    Food:
-      '🍱',
-
-    Supplies:
-      '📦',
-
-    Power:
-      '⚡'
-  }
-
-  return (
-    icons[type] ||
-    '🚨'
-  )
-}
-
-/* =========================
+/* =========================================================
    PRIORITY COLOR
-========================= */
+========================================================= */
 
 const getPriorityColor = (
   priority,
@@ -1019,13 +1456,16 @@ const getPriorityColor = (
     normalizeStatus(status) ===
     'RESOLVED'
   ) {
+
     return '#22c55e'
+
   }
 
+
   switch (
-    String(priority)
-      .toLowerCase()
+    String(priority || '')
       .trim()
+      .toLowerCase()
   ) {
 
     case 'critical':
@@ -1041,87 +1481,135 @@ const getPriorityColor = (
       return '#22c55e'
 
     default:
-      return '#6b7280'
+      return '#64748b'
+
   }
+
 }
 
-/* =========================
-   LATITUDE
-========================= */
 
-const latitudeText = (
-  value
-) => {
+/* =========================================================
+   ICONS
+========================================================= */
+
+const getIcon = type => {
+
+  const icons = {
+
+    'Potable Water': '💧',
+
+    'Medical Aid': '🚑',
+
+    'Search & Rescue': '🛟',
+
+    Shelter: '🏠',
+
+    Water: '💧',
+
+    Medical: '🏥',
+
+    Rescue: '🛟',
+
+    Transport: '🚗',
+
+    'Food/Supplies': '📦',
+
+    Food: '🍱',
+
+    Supplies: '📦',
+
+    Power: '⚡'
+
+  }
+
+
+  return (
+    icons[type] ||
+    '🚨'
+  )
+
+}
+
+
+/* =========================================================
+   COORDINATES
+========================================================= */
+
+const latitudeText = value => {
 
   const number =
     Number(value)
 
-  return Number.isFinite(
-    number
-  )
+
+  return Number.isFinite(number)
     ? number.toFixed(5)
     : '--'
+
 }
 
-/* =========================
-   LONGITUDE
-========================= */
 
-const longitudeText = (
-  value
-) => {
+const longitudeText = value => {
 
   const number =
     Number(value)
 
-  return Number.isFinite(
-    number
-  )
+
+  return Number.isFinite(number)
     ? number.toFixed(5)
     : '--'
+
 }
 
-/* =========================
-   HTML ESCAPE
-========================= */
 
-const escapeHtml = (
-  value
-) => {
+/* =========================================================
+   ESCAPE HTML
+========================================================= */
+
+const escapeHtml = value => {
 
   if (
     value === null ||
     value === undefined
   ) {
+
     return ''
+
   }
 
+
   return String(value)
+
     .replace(
       /&/g,
       '&amp;'
     )
+
     .replace(
       /</g,
       '&lt;'
     )
+
     .replace(
       />/g,
       '&gt;'
     )
+
     .replace(
       /"/g,
       '&quot;'
     )
+
     .replace(
       /'/g,
       '&#039;'
     )
+
 }
 
-/* =========================
+
+/* =========================================================
    CLEANUP
-========================= */
+========================================================= */
 
 onBeforeUnmount(() => {
 
@@ -1132,61 +1620,97 @@ onBeforeUnmount(() => {
       handleMapClick
     )
 
+
     map.off(
       'popupopen',
       handlePopupOpen
     )
 
+
     map.remove()
 
     map = null
+
   }
 
+
   selectedMarker = null
+
   emergencyLayer = null
+
+  userLocationMarker = null
+
+  userLocationCircle = null
+
 })
+
 </script>
 
+
 <template>
+
   <div
     ref="mapContainer"
     class="disaster-map"
   ></div>
+
 </template>
+
 
 <style scoped>
 
 .disaster-map {
-  width: 100%;
-  height: 100%;
-  min-height: 400px;
+
+  width:
+    100%;
+
+  height:
+    100%;
+
+  min-height:
+    400px;
+
 }
 
-/*
- * Leaflet itself needs a real height.
- */
 
 :deep(.leaflet-container) {
-  width: 100%;
-  height: 100%;
-  min-height: 400px;
-  border-radius: 12px;
+
+  width:
+    100%;
+
+  height:
+    100%;
+
+  min-height:
+    400px;
+
+  border-radius:
+    12px;
+
 }
 
-/*
- * Popup styling
- */
 
 :deep(.leaflet-popup-content) {
-  margin: 12px;
+
+  margin:
+    12px;
+
 }
+
 
 :deep(.leaflet-popup-content-wrapper) {
-  border-radius: 10px;
+
+  border-radius:
+    10px;
+
 }
 
+
 :deep(.aidmap-accept-button:hover) {
-  filter: brightness(0.95);
+
+  filter:
+    brightness(0.95);
+
 }
 
 </style>

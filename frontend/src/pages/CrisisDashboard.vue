@@ -1,13 +1,11 @@
 <script setup>
+
 import {
   onMounted,
   onBeforeUnmount,
   ref,
-  watch
+  computed
 } from 'vue'
-
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
 
 import {
   collection,
@@ -17,247 +15,385 @@ import {
   serverTimestamp
 } from 'firebase/firestore'
 
+import {
+  getAuth
+} from 'firebase/auth'
+
+import { useRouter } from 'vue-router'
+
 import { db } from '../firebase/firebase'
 
+import DisasterMap from '../components/DisasterMap.vue'
 import NearbyHelp from '../components/NearbyHelp.vue'
 
 
 /* =========================================================
-   LEAFLET ICON FIX
+   AUTH + ROUTER
 ========================================================= */
 
-delete L.Icon.Default.prototype._getIconUrl
-
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl:
-    'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-
-  iconUrl:
-    'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-
-  shadowUrl:
-    'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png'
-})
-
-
-/* =========================================================
-   PROPS
-========================================================= */
-
-const props = defineProps({
-  focusLocation: {
-    type: Object,
-    default: null
-  },
-
-  volunteerId: {
-    type: String,
-    default: ''
-  }
-})
-
-
-/* =========================================================
-   EVENTS
-========================================================= */
-
-const emit = defineEmits([
-  'location-selected',
-  'emergencies-updated',
-  'accept-emergency'
-])
-
-
-/* =========================================================
-   MAP
-========================================================= */
-
-const mapContainer = ref(null)
-
-let map = null
-let selectedMarker = null
-let emergencyLayer = null
-let unsubscribeEmergencies = null
+const auth = getAuth()
+const router = useRouter()
 
 
 /* =========================================================
    STATE
 ========================================================= */
 
-const emergencyData = ref([])
+const emergencies = ref([])
 
-const selectedLocation = ref(
-  props.focusLocation || {
-    latitude: 12.8260,
-    longitude: 80.2333
-  }
-)
+/*
+  IMPORTANT:
+  Do NOT hardcode the user's location here.
+
+  null means:
+  "No location selected yet."
+*/
+const selectedLocation = ref(null)
+
+const loading = ref(true)
+
+const errorMessage = ref('')
 
 const activeFilter = ref('all')
 
 const searchText = ref('')
 
-const loadingEmergencies = ref(true)
-
 const updatingEmergency = ref(false)
+
+let unsubscribe = null
 
 
 /* =========================================================
-   FILTER EMERGENCIES
+   VOLUNTEER ID
 ========================================================= */
 
-const filteredEmergencies = () => {
-  let result = [...emergencyData.value]
+const volunteerId = computed(() => {
 
-  /* STATUS FILTER */
+  return auth.currentUser?.uid || ''
 
-  if (activeFilter.value !== 'all') {
-    result = result.filter(emergency => {
-      const status = String(
-        emergency.status || 'pending'
-      ).toLowerCase()
+})
 
-      return status === activeFilter.value
-    })
+
+/* =========================================================
+   REPORT EMERGENCY
+========================================================= */
+
+/*
+  If the user has clicked a coordinate on the map,
+  send that coordinate to the emergency form.
+
+  Example:
+
+  /report-emergency?latitude=12.123&longitude=80.123
+*/
+
+const reportEmergency = () => {
+
+  /*
+    No location selected yet.
+  */
+  if (
+    !selectedLocation.value ||
+    !Number.isFinite(
+      Number(selectedLocation.value.latitude)
+    ) ||
+    !Number.isFinite(
+      Number(selectedLocation.value.longitude)
+    )
+  ) {
+
+    /*
+      Still allow the user to open the report page.
+
+      The report page itself can ask for
+      live location.
+    */
+
+    router.push('/report-emergency')
+
+    return
   }
+
+
+  /*
+    Location exists.
+  */
+
+  router.push({
+    path: '/report-emergency',
+
+    query: {
+
+      latitude:
+        String(
+          selectedLocation.value.latitude
+        ),
+
+      longitude:
+        String(
+          selectedLocation.value.longitude
+        )
+
+    }
+
+  })
+
+}
+
+
+/* =========================================================
+   STATUS NORMALIZER
+========================================================= */
+
+const normalizeStatus = status => {
+
+  return String(
+    status || 'pending'
+  )
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, '_')
+    .replace(/\s+/g, '_')
+
+}
+
+
+/* =========================================================
+   ICON
+========================================================= */
+
+const getIcon = type => {
+
+  const icons = {
+
+    'Potable Water': '💧',
+
+    'Medical Aid': '🚑',
+
+    'Search & Rescue': '🛟',
+
+    Shelter: '🏠',
+
+    Water: '💧',
+
+    Medical: '🏥',
+
+    Rescue: '🛟',
+
+    Transport: '🚗',
+
+    Food: '🍱',
+
+    Supplies: '📦',
+
+    'Food/Supplies': '📦',
+
+    Power: '⚡'
+
+  }
+
+  return (
+    icons[type] ||
+    '🚨'
+  )
+
+}
+
+
+/* =========================================================
+   COORDINATE FORMATTERS
+========================================================= */
+
+const latitudeText = value => {
+
+  const number =
+    Number(value)
+
+  return Number.isFinite(number)
+    ? number.toFixed(5)
+    : '--'
+
+}
+
+
+const longitudeText = value => {
+
+  const number =
+    Number(value)
+
+  return Number.isFinite(number)
+    ? number.toFixed(5)
+    : '--'
+
+}
+
+
+/* =========================================================
+   FILTERED EMERGENCIES
+========================================================= */
+
+const filteredEmergencies = computed(() => {
+
+  let result = [
+    ...emergencies.value
+  ]
+
+
+  /* FILTER */
+
+  if (
+    activeFilter.value !== 'all'
+  ) {
+
+    result =
+      result.filter(
+        emergency => {
+
+          return normalizeStatus(
+            emergency.status
+          ) ===
+          activeFilter.value
+
+        }
+      )
+
+  }
+
 
   /* SEARCH */
 
-  if (searchText.value.trim()) {
-    const search =
-      searchText.value
-        .trim()
-        .toLowerCase()
+  const search =
+    searchText.value
+      .trim()
+      .toLowerCase()
 
-    result = result.filter(emergency => {
-      const type =
-        String(
-          emergency.type || ''
-        ).toLowerCase()
 
-      const description =
-        String(
-          emergency.description || ''
-        ).toLowerCase()
+  if (search) {
 
-      const priority =
-        String(
-          emergency.priority ||
-          emergency.severity ||
-          ''
-        ).toLowerCase()
+    result =
+      result.filter(
+        emergency => {
 
-      return (
-        type.includes(search) ||
-        description.includes(search) ||
-        priority.includes(search)
+          const type =
+            String(
+              emergency.type || ''
+            ).toLowerCase()
+
+
+          const description =
+            String(
+              emergency.description || ''
+            ).toLowerCase()
+
+
+          const priority =
+            String(
+              emergency.priority ||
+              emergency.severity ||
+              ''
+            ).toLowerCase()
+
+
+          const status =
+            String(
+              emergency.status || ''
+            ).toLowerCase()
+
+
+          const address =
+            String(
+              emergency.address || ''
+            ).toLowerCase()
+
+
+          return (
+
+            type.includes(search) ||
+
+            description.includes(search) ||
+
+            priority.includes(search) ||
+
+            status.includes(search) ||
+
+            address.includes(search)
+
+          )
+
+        }
       )
-    })
+
   }
 
+
   return result
-}
+
+})
 
 
 /* =========================================================
    STATS
 ========================================================= */
 
-const totalEmergencies = () => {
-  return emergencyData.value.length
-}
-
-
-const pendingEmergencies = () => {
-  return emergencyData.value.filter(
-    emergency => {
-      const status =
-        String(
-          emergency.status || 'pending'
-        ).toLowerCase()
-
-      return status === 'pending'
-    }
-  ).length
-}
-
-
-const activeEmergencies = () => {
-  return emergencyData.value.filter(
-    emergency => {
-      const status =
-        String(
-          emergency.status || ''
-        ).toLowerCase()
-
-      return (
-        status === 'accepted' ||
-        status === 'in progress' ||
-        status === 'in_progress'
-      )
-    }
-  ).length
-}
-
-
-const resolvedEmergencies = () => {
-  return emergencyData.value.filter(
-    emergency => {
-      const status =
-        String(
-          emergency.status || ''
-        ).toLowerCase()
-
-      return status === 'resolved'
-    }
-  ).length
-}
-
-
-/* =========================================================
-   INITIALIZE MAP
-========================================================= */
-
-const initializeMap = () => {
-  if (!mapContainer.value) return
-
-  map = L.map(
-    mapContainer.value
-  ).setView(
-    [12.8260, 80.2333],
-    12
+const totalEmergencies =
+  computed(() =>
+    emergencies.value.length
   )
 
-  L.tileLayer(
-    'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    {
-      maxZoom: 19,
 
-      attribution:
-        '&copy; OpenStreetMap contributors'
-    }
-  ).addTo(map)
+const pendingEmergencies =
+  computed(() =>
 
-  emergencyLayer =
-    L.layerGroup().addTo(map)
+    emergencies.value.filter(
+      emergency =>
 
-  map.on(
-    'click',
-    handleMapClick
+        normalizeStatus(
+          emergency.status
+        ) === 'pending'
+
+    ).length
+
   )
 
-  setTimeout(() => {
-    if (map) {
-      map.invalidateSize()
-    }
-  }, 300)
 
-  setTimeout(() => {
-    if (map) {
-      map.invalidateSize()
-    }
-  }, 1000)
-}
+const activeEmergencies =
+  computed(() =>
+
+    emergencies.value.filter(
+      emergency => {
+
+        const status =
+          normalizeStatus(
+            emergency.status
+          )
+
+        return (
+
+          status === 'accepted' ||
+
+          status === 'in_progress'
+
+        )
+
+      }
+    ).length
+
+  )
+
+
+const resolvedEmergencies =
+  computed(() =>
+
+    emergencies.value.filter(
+      emergency =>
+
+        normalizeStatus(
+          emergency.status
+        ) === 'resolved'
+
+    ).length
+
+  )
 
 
 /* =========================================================
@@ -266,8 +402,14 @@ const initializeMap = () => {
 
 const subscribeToEmergencies = () => {
 
-  unsubscribeEmergencies =
+  loading.value = true
+
+  errorMessage.value = ''
+
+
+  unsubscribe =
     onSnapshot(
+
       collection(
         db,
         'emergencies'
@@ -275,689 +417,107 @@ const subscribeToEmergencies = () => {
 
       snapshot => {
 
-        const emergencies = []
+        emergencies.value =
+          snapshot.docs.map(
+            docSnap => ({
 
-        snapshot.forEach(
-          docSnap => {
-
-            emergencies.push({
-              _id: docSnap.id,
+              _id:
+                docSnap.id,
 
               firestoreId:
                 docSnap.id,
 
               ...docSnap.data()
+
             })
+          )
 
-          }
-        )
 
-        emergencyData.value =
-          emergencies
+        loading.value = false
 
-        loadingEmergencies.value =
-          false
-
-        displayEmergencies(
-          emergencies
-        )
-
-        emit(
-          'emergencies-updated',
-          emergencies
-        )
-
-        console.log(
-          '🔥 Live emergencies updated:',
-          emergencies
-        )
       },
 
       error => {
 
         console.error(
-          '❌ Firestore emergency listener failed:',
+          'Firestore emergency listener error:',
           error
         )
 
-        loadingEmergencies.value =
-          false
+
+        loading.value = false
+
+
+        errorMessage.value =
+          'Unable to load live emergencies.'
+
       }
+
     )
+
 }
 
 
 /* =========================================================
-   WATCH PARENT LOCATION
+   MAP LOCATION SELECTED
 ========================================================= */
 
-watch(
-  () => props.focusLocation,
+const handleLocationSelected = location => {
 
-  location => {
-
-    if (!location) return
-
-    const latitude =
-      Number(
-        location.latitude
-      )
-
-    const longitude =
-      Number(
-        location.longitude
-      )
-
-    if (
-      !Number.isFinite(latitude) ||
-      !Number.isFinite(longitude)
-    ) {
-      return
-    }
-
-    selectedLocation.value = {
-      latitude,
-      longitude
-    }
-
-    if (!map) return
-
-    map.flyTo(
-      [
-        latitude,
-        longitude
-      ],
-      15,
-      {
-        duration: 1
-      }
-    )
-
-    if (selectedMarker) {
-      map.removeLayer(
-        selectedMarker
-      )
-    }
-
-    selectedMarker =
-      L.marker([
-        latitude,
-        longitude
-      ]).addTo(map)
-
-    selectedMarker
-      .bindPopup(`
-        <strong>
-          📍 Selected Location
-        </strong>
-
-        <br><br>
-
-        Latitude:
-        ${latitude.toFixed(6)}
-
-        <br>
-
-        Longitude:
-        ${longitude.toFixed(6)}
-      `)
-      .openPopup()
-  },
-
-  {
-    deep: true
-  }
-)
-
-
-/* =========================================================
-   MAP CLICK
-========================================================= */
-
-const handleMapClick = event => {
-
-  const latitude =
-    event.latlng.lat
-
-  const longitude =
-    event.latlng.lng
-
-  if (selectedMarker) {
-
-    map.removeLayer(
-      selectedMarker
-    )
+  if (!location) {
+    return
   }
 
-  selectedMarker =
-    L.marker([
-      latitude,
-      longitude
-    ]).addTo(map)
-
-  selectedMarker
-    .bindPopup(`
-      <strong>
-        📍 Selected Location
-      </strong>
-
-      <br><br>
-
-      Latitude:
-      ${latitude.toFixed(6)}
-
-      <br>
-
-      Longitude:
-      ${longitude.toFixed(6)}
-    `)
-    .openPopup()
-
-  selectedLocation.value = {
-    latitude,
-    longitude
-  }
-
-  emit(
-    'location-selected',
-    {
-      latitude,
-      longitude
-    }
-  )
-}
-
-
-/* =========================================================
-   NEARBY HELP LOCATION
-========================================================= */
-
-const handleNearbyLocation = location => {
-
-  if (!location) return
 
   const latitude =
     Number(
       location.latitude
     )
 
+
   const longitude =
     Number(
       location.longitude
     )
 
+
   if (
-    !Number.isFinite(latitude) ||
-    !Number.isFinite(longitude)
+
+    !Number.isFinite(
+      latitude
+    ) ||
+
+    !Number.isFinite(
+      longitude
+    )
+
   ) {
+
     return
+
   }
+
+
+  /*
+    Save the exact coordinate
+    clicked by the user.
+  */
 
   selectedLocation.value = {
+
     latitude,
+
     longitude
+
   }
 
-  emit(
-    'location-selected',
-    {
-      latitude,
-      longitude
-    }
+
+  console.log(
+    '📍 Selected map location:',
+    selectedLocation.value
   )
 
-  if (!map) return
-
-  map.flyTo(
-    [
-      latitude,
-      longitude
-    ],
-    15,
-    {
-      duration: 1
-    }
-  )
-
-  if (selectedMarker) {
-
-    map.removeLayer(
-      selectedMarker
-    )
-  }
-
-  selectedMarker =
-    L.marker([
-      latitude,
-      longitude
-    ]).addTo(map)
-
-  selectedMarker
-    .bindPopup(`
-      <strong>
-        📍 Selected Location
-      </strong>
-
-      <br><br>
-
-      Latitude:
-      ${latitude.toFixed(6)}
-
-      <br>
-
-      Longitude:
-      ${longitude.toFixed(6)}
-    `)
-    .openPopup()
 }
-
-
-/* =========================================================
-   DISPLAY EMERGENCIES
-========================================================= */
-
-const displayEmergencies =
-  emergencies => {
-
-    if (!emergencyLayer) {
-      return
-    }
-
-    emergencyLayer.clearLayers()
-
-    emergencies.forEach(
-      emergency => {
-
-        if (
-          emergency.latitude ==
-            null ||
-          emergency.longitude ==
-            null
-        ) {
-          return
-        }
-
-        const latitude =
-          Number(
-            emergency.latitude
-          )
-
-        const longitude =
-          Number(
-            emergency.longitude
-          )
-
-        if (
-          !Number.isFinite(
-            latitude
-          ) ||
-          !Number.isFinite(
-            longitude
-          )
-        ) {
-          return
-        }
-
-        const priority =
-          emergency.priority ||
-          emergency.severity ||
-          'Low'
-
-        const status =
-          String(
-            emergency.status ||
-              'pending'
-          ).toLowerCase()
-
-        const color =
-          getPriorityColor(
-            priority,
-            status
-          )
-
-        const marker =
-          L.circleMarker(
-            [
-              latitude,
-              longitude
-            ],
-            {
-              radius:
-                status ===
-                'resolved'
-                  ? 7
-                  : 11,
-
-              fillColor:
-                color,
-
-              color:
-                '#ffffff',
-
-              weight: 3,
-
-              opacity: 1,
-
-              fillOpacity:
-                status ===
-                'resolved'
-                  ? 0.5
-                  : 0.9
-            }
-          )
-
-        marker.bindPopup(
-          createPopup(
-            emergency,
-            color
-          )
-        )
-
-        emergencyLayer.addLayer(
-          marker
-        )
-      }
-    )
-  }
-
-
-/* =========================================================
-   POPUP
-========================================================= */
-
-const createPopup = (
-  emergency,
-  color
-) => {
-
-  const status =
-    String(
-      emergency.status ||
-        'pending'
-    ).toLowerCase()
-
-  const volunteer =
-    emergency.assignedVolunteer ||
-    emergency.assignedVolunteerName
-
-  let statusContent = ''
-
-
-  /* PENDING */
-
-  if (
-    status === 'pending'
-  ) {
-
-    statusContent = `
-      <div style="
-        margin-top:10px;
-        padding:8px;
-        border-radius:7px;
-        background:#fef3c7;
-        color:#b45309;
-        text-align:center;
-        font-weight:600;
-        font-size:12px;
-      ">
-        ⏳ Waiting for a volunteer
-      </div>
-    `
-
-    if (props.volunteerId) {
-
-      statusContent += `
-        <button
-          class="aidmap-accept-button"
-          data-emergency-id="${escapeHtml(
-            emergency.firestoreId ||
-            emergency._id ||
-            emergency.id
-          )}"
-
-          style="
-            width:100%;
-            margin-top:10px;
-            padding:10px;
-            border:none;
-            border-radius:8px;
-            background:#16a34a;
-            color:white;
-            font-weight:700;
-            cursor:pointer;
-            font-size:13px;
-          "
-        >
-          🙋 I Can Help
-        </button>
-      `
-    }
-  }
-
-
-  /* ACCEPTED */
-
-  else if (
-    status === 'accepted'
-  ) {
-
-    statusContent = `
-      <div style="
-        margin-top:10px;
-        padding:8px;
-        border-radius:7px;
-        background:#dbeafe;
-        color:#2563eb;
-        text-align:center;
-        font-weight:600;
-        font-size:12px;
-      ">
-        🙋 Help is on the way
-      </div>
-    `
-  }
-
-
-  /* IN PROGRESS */
-
-  else if (
-    status === 'in progress' ||
-    status === 'in_progress'
-  ) {
-
-    statusContent = `
-      <div style="
-        margin-top:10px;
-        padding:8px;
-        border-radius:7px;
-        background:#ede9fe;
-        color:#7c3aed;
-        text-align:center;
-        font-weight:600;
-        font-size:12px;
-      ">
-        🚑 Volunteer is responding
-      </div>
-    `
-  }
-
-
-  /* RESOLVED */
-
-  else if (
-    status === 'resolved'
-  ) {
-
-    statusContent = `
-      <div style="
-        margin-top:10px;
-        padding:8px;
-        border-radius:7px;
-        background:#dcfce7;
-        color:#16a34a;
-        text-align:center;
-        font-weight:600;
-        font-size:12px;
-      ">
-        ✅ Resolved
-      </div>
-    `
-  }
-
-
-  return `
-    <div style="min-width:220px;">
-
-      <h3 style="
-        margin:0 0 8px;
-        font-size:16px;
-      ">
-
-        ${getIcon(
-          emergency.type
-        )}
-
-        ${escapeHtml(
-          emergency.type ||
-            'Emergency'
-        )}
-
-      </h3>
-
-
-      <div style="
-        margin-bottom:6px;
-        font-weight:600;
-      ">
-
-        Priority:
-
-        <span style="
-          color:${color};
-        ">
-
-          ${escapeHtml(
-            emergency.priority ||
-            emergency.severity ||
-            'Unknown'
-          )}
-
-        </span>
-
-      </div>
-
-
-      <div style="
-        margin-bottom:8px;
-        font-size:12px;
-      ">
-
-        Status:
-
-        <strong>
-
-          ${escapeHtml(
-            emergency.status ||
-              'pending'
-          )}
-
-        </strong>
-
-      </div>
-
-
-      <p style="
-        margin:8px 0;
-        color:#374151;
-        font-size:13px;
-      ">
-
-        ${escapeHtml(
-          emergency.description ||
-            'No description provided.'
-        )}
-
-      </p>
-
-
-      <div style="
-        font-size:11px;
-        color:#6b7280;
-      ">
-
-        📍
-
-        ${latitudeText(
-          emergency.latitude
-        )},
-
-        ${longitudeText(
-          emergency.longitude
-        )}
-
-      </div>
-
-
-      ${
-        volunteer
-          ? `
-            <div style="
-              margin-top:8px;
-              color:#6b7280;
-              font-size:12px;
-            ">
-
-              👤 Volunteer:
-
-              <strong>
-
-                ${escapeHtml(
-                  volunteer
-                )}
-
-              </strong>
-
-            </div>
-          `
-          : ''
-      }
-
-
-      ${statusContent}
-
-    </div>
-  `
-}
-
-
-/* =========================================================
-   POPUP CLICK
-========================================================= */
-
-const handlePopupClick =
-  event => {
-
-    const button =
-      event.target.closest(
-        '.aidmap-accept-button'
-      )
-
-    if (!button) return
-
-    const emergencyId =
-      button.dataset.emergencyId
-
-    if (!emergencyId) return
-
-    emit(
-      'accept-emergency',
-      emergencyId
-    )
-
-    acceptEmergency(
-      emergencyId
-    )
-  }
 
 
 /* =========================================================
@@ -967,19 +527,31 @@ const handlePopupClick =
 const acceptEmergency =
   async emergencyId => {
 
-    if (!props.volunteerId) {
+    if (!volunteerId.value) {
 
       alert(
         'Please login as a volunteer first.'
       )
 
       return
+
     }
+
+
+    if (
+      updatingEmergency.value
+    ) {
+
+      return
+
+    }
+
 
     try {
 
       updatingEmergency.value =
         true
+
 
       const emergencyRef =
         doc(
@@ -988,28 +560,30 @@ const acceptEmergency =
           emergencyId
         )
 
+
       await updateDoc(
+
         emergencyRef,
+
         {
+
           status:
             'accepted',
 
-          assignedVolunteer:
-            props.volunteerId,
-
           assignedVolunteerId:
-            props.volunteerId,
+            volunteerId.value,
+
+          assignedVolunteer:
+            volunteerId.value,
 
           acceptedAt:
             serverTimestamp(),
 
           updatedAt:
             serverTimestamp()
-        }
-      )
 
-      console.log(
-        '✅ Emergency accepted'
+        }
+
       )
 
     }
@@ -1017,9 +591,10 @@ const acceptEmergency =
     catch (error) {
 
       console.error(
-        '❌ Accept emergency failed:',
+        'Accept emergency failed:',
         error
       )
+
 
       alert(
         'Unable to accept this emergency.'
@@ -1031,172 +606,23 @@ const acceptEmergency =
 
       updatingEmergency.value =
         false
+
     }
+
   }
 
 
 /* =========================================================
-   ICONS
+   NEARBY HELP LOCATION
 ========================================================= */
 
-const getIcon = type => {
+const handleNearbyLocation =
+  location => {
 
-  const icons = {
-
-    'Potable Water':
-      '💧',
-
-    'Medical Aid':
-      '🚑',
-
-    'Search & Rescue':
-      '🛟',
-
-    Shelter:
-      '🏠',
-
-    Water:
-      '💧',
-
-    Medical:
-      '🏥',
-
-    Rescue:
-      '🛟',
-
-    Transport:
-      '🚗',
-
-    Food:
-      '🍱',
-
-    Supplies:
-      '📦',
-
-    Power:
-      '⚡'
-  }
-
-  return (
-    icons[type] ||
-    '🚨'
-  )
-}
-
-
-/* =========================================================
-   PRIORITY COLOR
-========================================================= */
-
-const getPriorityColor =
-  (
-    priority,
-    status
-  ) => {
-
-    if (
-      status ===
-      'resolved'
-    ) {
-      return '#22c55e'
-    }
-
-    switch (
-      String(
-        priority || ''
-      ).toLowerCase()
-    ) {
-
-      case 'critical':
-        return '#dc2626'
-
-      case 'high':
-        return '#ef4444'
-
-      case 'medium':
-        return '#f59e0b'
-
-      case 'low':
-        return '#22c55e'
-
-      default:
-        return '#64748b'
-    }
-  }
-
-
-/* =========================================================
-   COORDINATES
-========================================================= */
-
-const latitudeText =
-  value => {
-
-    const number =
-      Number(value)
-
-    return Number.isFinite(
-      number
+    handleLocationSelected(
+      location
     )
-      ? number.toFixed(5)
-      : '--'
-  }
 
-
-const longitudeText =
-  value => {
-
-    const number =
-      Number(value)
-
-    return Number.isFinite(
-      number
-    )
-      ? number.toFixed(5)
-      : '--'
-  }
-
-
-/* =========================================================
-   ESCAPE HTML
-========================================================= */
-
-const escapeHtml =
-  value => {
-
-    if (
-      value === null ||
-      value === undefined
-    ) {
-      return ''
-    }
-
-    return String(value)
-
-      .replace(
-        /&/g,
-        '&amp;'
-      )
-
-      .replace(
-        /</g,
-        '&lt;'
-      )
-
-      .replace(
-        />/g,
-        '&gt;'
-      )
-
-      .replace(
-        /"/g,
-        '&quot;'
-      )
-
-      .replace(
-        /'/g,
-        '&#039;'
-      )
   }
 
 
@@ -1206,50 +632,23 @@ const escapeHtml =
 
 onMounted(() => {
 
-  initializeMap()
-
   subscribeToEmergencies()
 
-  if (map) {
-
-    map.on(
-      'popupopen',
-      event => {
-
-        const popupElement =
-          event.popup.getElement()
-
-        if (!popupElement) return
-
-        popupElement.addEventListener(
-          'click',
-          handlePopupClick
-        )
-      }
-    )
-  }
 })
 
 
 onBeforeUnmount(() => {
 
-  if (
-    unsubscribeEmergencies
-  ) {
+  if (unsubscribe) {
 
-    unsubscribeEmergencies()
+    unsubscribe()
 
-    unsubscribeEmergencies =
-      null
+    unsubscribe = null
+
   }
 
-  if (map) {
-
-    map.remove()
-
-    map = null
-  }
 })
+
 </script>
 
 
@@ -1258,13 +657,13 @@ onBeforeUnmount(() => {
   <div class="crisis-dashboard">
 
 
-    <!-- =====================================================
+    <!-- ===================================================
          HEADER
-    ====================================================== -->
+    ==================================================== -->
 
     <header class="dashboard-header">
 
-      <div>
+      <div class="header-content">
 
         <h1>
           🚨 Crisis Response Center
@@ -1278,6 +677,41 @@ onBeforeUnmount(() => {
       </div>
 
 
+      <!-- REPORT EMERGENCY -->
+
+      <button
+        type="button"
+        class="report-emergency-button"
+        @click="reportEmergency"
+      >
+
+        <span class="report-icon">
+          🚨
+        </span>
+
+        <span class="report-text">
+
+          <strong>
+            Report an Emergency
+          </strong>
+
+          <small
+            v-if="selectedLocation"
+          >
+            📍 Use selected map location
+          </small>
+
+          <small
+            v-else
+          >
+            Need immediate help?
+          </small>
+
+        </span>
+
+      </button>
+
+
       <div class="live-indicator">
 
         <span class="live-dot"></span>
@@ -1289,9 +723,62 @@ onBeforeUnmount(() => {
     </header>
 
 
-    <!-- =====================================================
+    <!-- ===================================================
+         SELECTED LOCATION INFO
+    ==================================================== -->
+
+    <div
+      v-if="selectedLocation"
+      class="selected-location-banner"
+    >
+
+      <span>
+        📍 Selected emergency location:
+      </span>
+
+      <strong>
+
+        {{
+          latitudeText(
+            selectedLocation.latitude
+          )
+        }},
+
+        {{
+          longitudeText(
+            selectedLocation.longitude
+          )
+        }}
+
+      </strong>
+
+      <button
+        type="button"
+        @click="reportEmergency"
+      >
+        🚨 Report here
+      </button>
+
+    </div>
+
+
+    <!-- ===================================================
+         ERROR
+    ==================================================== -->
+
+    <div
+      v-if="errorMessage"
+      class="error-banner"
+    >
+
+      ⚠️ {{ errorMessage }}
+
+    </div>
+
+
+    <!-- ===================================================
          STATS
-    ====================================================== -->
+    ==================================================== -->
 
     <section class="stats-grid">
 
@@ -1309,7 +796,7 @@ onBeforeUnmount(() => {
           </span>
 
           <strong>
-            {{ totalEmergencies() }}
+            {{ totalEmergencies }}
           </strong>
 
         </div>
@@ -1330,7 +817,7 @@ onBeforeUnmount(() => {
           </span>
 
           <strong>
-            {{ pendingEmergencies() }}
+            {{ pendingEmergencies }}
           </strong>
 
         </div>
@@ -1351,7 +838,7 @@ onBeforeUnmount(() => {
           </span>
 
           <strong>
-            {{ activeEmergencies() }}
+            {{ activeEmergencies }}
           </strong>
 
         </div>
@@ -1372,19 +859,20 @@ onBeforeUnmount(() => {
           </span>
 
           <strong>
-            {{ resolvedEmergencies() }}
+            {{ resolvedEmergencies }}
           </strong>
 
         </div>
 
       </div>
 
+
     </section>
 
 
-    <!-- =====================================================
+    <!-- ===================================================
          LIVE MAP
-    ====================================================== -->
+    ==================================================== -->
 
     <section class="dashboard-card">
 
@@ -1398,7 +886,8 @@ onBeforeUnmount(() => {
           </h2>
 
           <p>
-            Click anywhere on the map to select a location.
+            Click anywhere on the map to select
+            an emergency location.
           </p>
 
         </div>
@@ -1413,23 +902,95 @@ onBeforeUnmount(() => {
 
       <div class="map-wrapper">
 
+        <DisasterMap
+          :emergencies="emergencies"
+          :focus-location="selectedLocation"
+          :volunteer-id="volunteerId"
+
+          @location-selected="
+            handleLocationSelected
+          "
+
+          @accept-emergency="
+            acceptEmergency
+          "
+        />
+
+      </div>
+
+
+      <!-- MAP LOCATION ACTION -->
+
+      <div class="map-action-area">
+
         <div
-          ref="mapContainer"
-          class="disaster-map"
-        ></div>
+          v-if="selectedLocation"
+          class="map-selected-info"
+        >
+
+          <div>
+
+            <strong>
+              📍 Location Selected
+            </strong>
+
+            <span>
+
+              Latitude:
+              {{
+                latitudeText(
+                  selectedLocation.latitude
+                )
+              }}
+
+              &nbsp; | &nbsp;
+
+              Longitude:
+              {{
+                longitudeText(
+                  selectedLocation.longitude
+                )
+              }}
+
+            </span>
+
+          </div>
+
+
+          <button
+            type="button"
+            class="map-report-button"
+            @click="reportEmergency"
+          >
+
+            🚨 Report Emergency Here
+
+          </button>
+
+        </div>
+
+
+        <div
+          v-else
+          class="map-no-location"
+        >
+
+          📍 Click anywhere on the map to
+          choose where help is needed.
+
+        </div>
 
       </div>
 
     </section>
 
 
-    <!-- =====================================================
+    <!-- ===================================================
          EMERGENCY REQUESTS
-    ====================================================== -->
+    ==================================================== -->
 
-    <section
-      class="dashboard-card emergency-section"
-    >
+    <section class="dashboard-card">
+
 
       <div class="card-header">
 
@@ -1451,6 +1012,7 @@ onBeforeUnmount(() => {
       <!-- FILTERS -->
 
       <div class="filters">
+
 
         <input
           v-model="searchText"
@@ -1501,6 +1063,19 @@ onBeforeUnmount(() => {
         <button
           :class="{
             active:
+              activeFilter === 'in_progress'
+          }"
+          @click="
+            activeFilter = 'in_progress'
+          "
+        >
+          🚑 In Progress
+        </button>
+
+
+        <button
+          :class="{
+            active:
               activeFilter === 'resolved'
           }"
           @click="
@@ -1510,13 +1085,14 @@ onBeforeUnmount(() => {
           ✅ Resolved
         </button>
 
+
       </div>
 
 
       <!-- LOADING -->
 
       <div
-        v-if="loadingEmergencies"
+        v-if="loading"
         class="empty-state"
       >
 
@@ -1529,7 +1105,7 @@ onBeforeUnmount(() => {
 
       <div
         v-else-if="
-          filteredEmergencies().length === 0
+          filteredEmergencies.length === 0
         "
         class="empty-state"
       >
@@ -1557,9 +1133,10 @@ onBeforeUnmount(() => {
         class="emergency-list"
       >
 
+
         <article
           v-for="
-            emergency in filteredEmergencies()
+            emergency in filteredEmergencies
           "
           :key="
             emergency.firestoreId ||
@@ -1569,16 +1146,7 @@ onBeforeUnmount(() => {
         >
 
 
-          <div
-            class="emergency-icon"
-            :class="
-              String(
-                emergency.priority ||
-                emergency.severity ||
-                'low'
-              ).toLowerCase()
-            "
-          >
+          <div class="emergency-icon">
 
             {{
               getIcon(
@@ -1598,11 +1166,14 @@ onBeforeUnmount(() => {
               <div>
 
                 <h3>
+
                   {{
                     emergency.type ||
                     'Emergency'
                   }}
+
                 </h3>
+
 
                 <span>
 
@@ -1620,15 +1191,9 @@ onBeforeUnmount(() => {
               <strong
                 class="status-badge"
                 :class="
-                  String(
-                    emergency.status ||
-                    'pending'
+                  normalizeStatus(
+                    emergency.status
                   )
-                    .toLowerCase()
-                    .replace(
-                      ' ',
-                      '-'
-                    )
                 "
               >
 
@@ -1638,6 +1203,7 @@ onBeforeUnmount(() => {
                 }}
 
               </strong>
+
 
             </div>
 
@@ -1653,6 +1219,7 @@ onBeforeUnmount(() => {
 
 
             <div class="emergency-meta">
+
 
               <span>
 
@@ -1675,41 +1242,63 @@ onBeforeUnmount(() => {
 
               <span
                 v-if="
-                  emergency.assignedVolunteer ||
-                  emergency.assignedVolunteerName
+                  emergency.address
                 "
               >
 
-                👤
+                🏠
 
                 {{
-                  emergency.assignedVolunteer ||
-                  emergency.assignedVolunteerName
+                  emergency.address
                 }}
 
               </span>
 
+
+              <span
+                v-if="
+                  emergency.contact ||
+                  emergency.phone
+                "
+              >
+
+                📞
+
+                {{
+                  emergency.contact ||
+                  emergency.phone
+                }}
+
+              </span>
+
+
             </div>
+
 
           </div>
 
+
         </article>
 
+
       </div>
+
 
     </section>
 
 
-    <!-- =====================================================
+    <!-- ===================================================
          NEARBY HELP
-    ====================================================== -->
+    ==================================================== -->
 
     <NearbyHelp
       :location="selectedLocation"
+
       @location-selected="
         handleNearbyLocation
       "
     />
+
 
   </div>
 
@@ -1719,7 +1308,7 @@ onBeforeUnmount(() => {
 <style scoped>
 
 /* =========================================================
-   PAGE
+   MAIN
 ========================================================= */
 
 .crisis-dashboard {
@@ -1734,7 +1323,6 @@ onBeforeUnmount(() => {
 
   background: #f8fafc;
 
-  overflow-y: auto;
 }
 
 
@@ -1750,9 +1338,20 @@ onBeforeUnmount(() => {
 
   align-items: center;
 
-  gap: 20px;
+  gap: 14px;
 
   margin-bottom: 20px;
+
+  flex-wrap: wrap;
+
+}
+
+.header-content {
+
+  flex: 1;
+
+  min-width: 240px;
+
 }
 
 .dashboard-header h1 {
@@ -1762,6 +1361,7 @@ onBeforeUnmount(() => {
   color: #0f172a;
 
   font-size: 25px;
+
 }
 
 .dashboard-header p {
@@ -1771,7 +1371,104 @@ onBeforeUnmount(() => {
   color: #64748b;
 
   font-size: 13px;
+
 }
+
+
+/* =========================================================
+   REPORT BUTTON
+========================================================= */
+
+.report-emergency-button {
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 10px;
+
+  border: none;
+
+  border-radius: 12px;
+
+  padding: 10px 16px;
+
+  background: #dc2626;
+
+  color: white;
+
+  cursor: pointer;
+
+  box-shadow:
+    0 5px 14px
+    rgba(220, 38, 38, 0.25);
+
+  transition:
+    transform .2s,
+    background .2s,
+    box-shadow .2s;
+
+}
+
+.report-emergency-button:hover {
+
+  background: #b91c1c;
+
+  transform: translateY(-2px);
+
+}
+
+.report-icon {
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: center;
+
+  width: 34px;
+
+  height: 34px;
+
+  border-radius: 9px;
+
+  background:
+    rgba(255,255,255,.18);
+
+  font-size: 18px;
+
+}
+
+.report-text {
+
+  display: flex;
+
+  flex-direction: column;
+
+  align-items: flex-start;
+
+  gap: 2px;
+
+}
+
+.report-text strong {
+
+  font-size: 13px;
+
+}
+
+.report-text small {
+
+  font-size: 10px;
+
+  opacity: .85;
+
+}
+
+
+/* =========================================================
+   LIVE
+========================================================= */
 
 .live-indicator {
 
@@ -1792,6 +1489,7 @@ onBeforeUnmount(() => {
   font-size: 11px;
 
   font-weight: 800;
+
 }
 
 .live-dot {
@@ -1805,6 +1503,7 @@ onBeforeUnmount(() => {
   background: #22c55e;
 
   animation: pulse 1.5s infinite;
+
 }
 
 @keyframes pulse {
@@ -1814,12 +1513,94 @@ onBeforeUnmount(() => {
   }
 
   50% {
-    opacity: 0.3;
+    opacity: .3;
   }
 
   100% {
     opacity: 1;
   }
+
+}
+
+
+/* =========================================================
+   SELECTED LOCATION
+========================================================= */
+
+.selected-location-banner {
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 10px;
+
+  flex-wrap: wrap;
+
+  margin-bottom: 18px;
+
+  padding: 12px 14px;
+
+  border:
+    1px solid #bfdbfe;
+
+  border-radius: 10px;
+
+  background: #eff6ff;
+
+  color: #1e40af;
+
+  font-size: 12px;
+
+}
+
+.selected-location-banner strong {
+
+  color: #1d4ed8;
+
+}
+
+.selected-location-banner button {
+
+  margin-left: auto;
+
+  border: none;
+
+  border-radius: 7px;
+
+  padding: 7px 11px;
+
+  background: #dc2626;
+
+  color: white;
+
+  font-size: 11px;
+
+  font-weight: 700;
+
+  cursor: pointer;
+
+}
+
+
+/* =========================================================
+   ERROR
+========================================================= */
+
+.error-banner {
+
+  margin-bottom: 15px;
+
+  padding: 12px;
+
+  border-radius: 8px;
+
+  background: #fee2e2;
+
+  color: #b91c1c;
+
+  font-size: 13px;
+
 }
 
 
@@ -1837,6 +1618,7 @@ onBeforeUnmount(() => {
   gap: 12px;
 
   margin-bottom: 20px;
+
 }
 
 .stat-card {
@@ -1851,9 +1633,11 @@ onBeforeUnmount(() => {
 
   background: white;
 
-  border: 1px solid #e2e8f0;
+  border:
+    1px solid #e2e8f0;
 
   border-radius: 12px;
+
 }
 
 .stat-icon {
@@ -1873,6 +1657,7 @@ onBeforeUnmount(() => {
   background: #eff6ff;
 
   font-size: 20px;
+
 }
 
 .stat-card span {
@@ -1882,6 +1667,7 @@ onBeforeUnmount(() => {
   color: #64748b;
 
   font-size: 11px;
+
 }
 
 .stat-card strong {
@@ -1893,6 +1679,7 @@ onBeforeUnmount(() => {
   color: #0f172a;
 
   font-size: 22px;
+
 }
 
 
@@ -1906,11 +1693,13 @@ onBeforeUnmount(() => {
 
   background: white;
 
-  border: 1px solid #e2e8f0;
+  border:
+    1px solid #e2e8f0;
 
   border-radius: 14px;
 
   overflow: hidden;
+
 }
 
 .card-header {
@@ -1923,7 +1712,9 @@ onBeforeUnmount(() => {
 
   padding: 15px 18px;
 
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom:
+    1px solid #e2e8f0;
+
 }
 
 .card-header h2 {
@@ -1933,6 +1724,7 @@ onBeforeUnmount(() => {
   color: #0f172a;
 
   font-size: 16px;
+
 }
 
 .card-header p {
@@ -1942,6 +1734,7 @@ onBeforeUnmount(() => {
   color: #64748b;
 
   font-size: 11px;
+
 }
 
 .map-status {
@@ -1951,6 +1744,7 @@ onBeforeUnmount(() => {
   font-size: 11px;
 
   font-weight: 700;
+
 }
 
 
@@ -1963,15 +1757,99 @@ onBeforeUnmount(() => {
   width: 100%;
 
   height: 500px;
+
 }
 
-.disaster-map {
 
-  width: 100%;
+/* =========================================================
+   MAP ACTION
+========================================================= */
 
-  height: 100%;
+.map-action-area {
 
-  min-height: 400px;
+  padding: 12px 18px;
+
+  border-top:
+    1px solid #e2e8f0;
+
+}
+
+.map-selected-info {
+
+  display: flex;
+
+  justify-content: space-between;
+
+  align-items: center;
+
+  gap: 15px;
+
+  flex-wrap: wrap;
+
+}
+
+.map-selected-info div {
+
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 4px;
+
+}
+
+.map-selected-info strong {
+
+  color: #1d4ed8;
+
+  font-size: 12px;
+
+}
+
+.map-selected-info span {
+
+  color: #64748b;
+
+  font-size: 10px;
+
+}
+
+.map-report-button {
+
+  border: none;
+
+  border-radius: 8px;
+
+  padding: 10px 14px;
+
+  background: #dc2626;
+
+  color: white;
+
+  font-size: 12px;
+
+  font-weight: 700;
+
+  cursor: pointer;
+
+}
+
+.map-report-button:hover {
+
+  background: #b91c1c;
+
+}
+
+.map-no-location {
+
+  padding: 8px;
+
+  color: #64748b;
+
+  font-size: 11px;
+
+  text-align: center;
+
 }
 
 
@@ -1989,7 +1867,9 @@ onBeforeUnmount(() => {
 
   padding: 14px 18px;
 
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom:
+    1px solid #e2e8f0;
+
 }
 
 .filters input {
@@ -2000,23 +1880,21 @@ onBeforeUnmount(() => {
 
   padding: 9px 11px;
 
-  border: 1px solid #cbd5e1;
+  border:
+    1px solid #cbd5e1;
 
   border-radius: 7px;
 
   outline: none;
 
   font-size: 11px;
-}
 
-.filters input:focus {
-
-  border-color: #2563eb;
 }
 
 .filters button {
 
-  border: 1px solid #e2e8f0;
+  border:
+    1px solid #e2e8f0;
 
   background: #f8fafc;
 
@@ -2031,11 +1909,7 @@ onBeforeUnmount(() => {
   font-size: 11px;
 
   font-weight: 700;
-}
 
-.filters button:hover {
-
-  border-color: #93c5fd;
 }
 
 .filters button.active {
@@ -2045,6 +1919,7 @@ onBeforeUnmount(() => {
   border-color: #2563eb;
 
   color: #1d4ed8;
+
 }
 
 
@@ -2061,6 +1936,7 @@ onBeforeUnmount(() => {
   gap: 10px;
 
   padding: 15px 18px;
+
 }
 
 .emergency-card {
@@ -2071,11 +1947,13 @@ onBeforeUnmount(() => {
 
   padding: 12px;
 
-  border: 1px solid #e2e8f0;
+  border:
+    1px solid #e2e8f0;
 
   border-radius: 10px;
 
-  transition: 0.2s;
+  transition: .2s;
+
 }
 
 .emergency-card:hover {
@@ -2083,6 +1961,7 @@ onBeforeUnmount(() => {
   border-color: #93c5fd;
 
   transform: translateY(-1px);
+
 }
 
 .emergency-icon {
@@ -2104,6 +1983,7 @@ onBeforeUnmount(() => {
   font-size: 20px;
 
   flex-shrink: 0;
+
 }
 
 .emergency-content {
@@ -2111,6 +1991,7 @@ onBeforeUnmount(() => {
   flex: 1;
 
   min-width: 0;
+
 }
 
 .emergency-title {
@@ -2120,6 +2001,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
 
   gap: 10px;
+
 }
 
 .emergency-title h3 {
@@ -2129,6 +2011,7 @@ onBeforeUnmount(() => {
   color: #0f172a;
 
   font-size: 13px;
+
 }
 
 .emergency-title span {
@@ -2140,6 +2023,7 @@ onBeforeUnmount(() => {
   color: #64748b;
 
   font-size: 10px;
+
 }
 
 .emergency-content p {
@@ -2149,6 +2033,7 @@ onBeforeUnmount(() => {
   color: #475569;
 
   font-size: 11px;
+
 }
 
 .status-badge {
@@ -2168,6 +2053,7 @@ onBeforeUnmount(() => {
   text-transform: uppercase;
 
   white-space: nowrap;
+
 }
 
 .status-badge.accepted {
@@ -2175,13 +2061,15 @@ onBeforeUnmount(() => {
   background: #dbeafe;
 
   color: #2563eb;
+
 }
 
-.status-badge.in-progress {
+.status-badge.in_progress {
 
   background: #ede9fe;
 
   color: #7c3aed;
+
 }
 
 .status-badge.resolved {
@@ -2189,6 +2077,7 @@ onBeforeUnmount(() => {
   background: #dcfce7;
 
   color: #16a34a;
+
 }
 
 .emergency-meta {
@@ -2202,6 +2091,7 @@ onBeforeUnmount(() => {
   color: #64748b;
 
   font-size: 10px;
+
 }
 
 
@@ -2218,6 +2108,7 @@ onBeforeUnmount(() => {
   color: #64748b;
 
   font-size: 12px;
+
 }
 
 .empty-state div {
@@ -2225,6 +2116,7 @@ onBeforeUnmount(() => {
   font-size: 28px;
 
   margin-bottom: 8px;
+
 }
 
 .empty-state strong {
@@ -2232,11 +2124,13 @@ onBeforeUnmount(() => {
   display: block;
 
   color: #334155;
+
 }
 
 .empty-state p {
 
   margin-top: 5px;
+
 }
 
 
@@ -2250,33 +2144,51 @@ onBeforeUnmount(() => {
 
     grid-template-columns:
       repeat(2, 1fr);
+
   }
 
 }
-
 
 @media (max-width: 600px) {
 
   .crisis-dashboard {
 
     padding: 10px;
+
   }
 
   .dashboard-header {
 
-    align-items: flex-start;
+    align-items: stretch;
 
     flex-direction: column;
+
+  }
+
+  .report-emergency-button {
+
+    width: 100%;
+
+    justify-content: center;
+
+  }
+
+  .live-indicator {
+
+    align-self: flex-start;
+
   }
 
   .stats-grid {
 
     grid-template-columns: 1fr;
+
   }
 
   .map-wrapper {
 
     height: 430px;
+
   }
 
   .card-header {
@@ -2284,11 +2196,35 @@ onBeforeUnmount(() => {
     align-items: flex-start;
 
     gap: 10px;
+
   }
 
   .emergency-title {
 
     flex-direction: column;
+
+  }
+
+  .selected-location-banner {
+
+    align-items: flex-start;
+
+    flex-direction: column;
+
+  }
+
+  .selected-location-banner button {
+
+    margin-left: 0;
+
+  }
+
+  .map-selected-info {
+
+    align-items: stretch;
+
+    flex-direction: column;
+
   }
 
 }

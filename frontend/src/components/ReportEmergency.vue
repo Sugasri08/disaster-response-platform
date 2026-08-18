@@ -1,126 +1,275 @@
 <script setup>
 import { ref } from 'vue'
-import { createEmergency } from '../services/api'
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore'
-import { auth, db } from '../firebase/firebase'
+
+import {
+  collection,
+  addDoc,
+  serverTimestamp
+} from 'firebase/firestore'
+
+import {
+  auth,
+  db
+} from '../firebase/firebase'
+
+/* =========================================================
+   EVENTS
+========================================================= */
 
 const emit = defineEmits([
   'close',
   'created'
 ])
 
-const selectedType = ref('')
+/* =========================================================
+   STATE
+========================================================= */
 
+const selectedType = ref('')
 const selectedPriority = ref('Low')
 
 const description = ref('')
+const address = ref('')
+const contact = ref('')
+const additionalInfo = ref('')
 
-const selectedLocation = ref(null)
+const latitude = ref('')
+const longitude = ref('')
+const locationAccuracy = ref('')
+
+const locationLoading = ref(false)
+const locationShared = ref(false)
 
 const submitting = ref(false)
 
 const error = ref('')
+const successMessage = ref('')
 
-// ------------------------------------
-// HELP TYPES
-// ------------------------------------
+/* =========================================================
+   HELP TYPES
+========================================================= */
 
 const helpTypes = [
-  {
-    type: 'Water',
-    icon: '💧'
-  },
-  {
-    type: 'Medical',
-    icon: '🏥'
-  },
-  {
-    type: 'Food',
-    icon: '🍱'
-  },
-  {
-    type: 'Rescue',
-    icon: '🛟'
-  },
-  {
-    type: 'Shelter',
-    icon: '🏠'
-  },
-  {
-    type: 'Power',
-    icon: '⚡'
-  }
+  { type: 'Water', icon: '💧' },
+  { type: 'Medical', icon: '🏥' },
+  { type: 'Food', icon: '🍱' },
+  { type: 'Rescue', icon: '🛟' },
+  { type: 'Shelter', icon: '🏠' },
+  { type: 'Power', icon: '⚡' }
 ]
 
-// ------------------------------------
-// SELECT TYPE
-// ------------------------------------
+/* =========================================================
+   SELECT HELP TYPE
+========================================================= */
 
-const selectHelpType = (type) => {
+const selectHelpType = type => {
   selectedType.value = type
+  error.value = ''
 }
 
-// ------------------------------------
-// SELECT LOCATION
-// ------------------------------------
+/* =========================================================
+   SHARE LIVE LOCATION
+========================================================= */
 
-const selectLocation = () => {
+const shareLiveLocation = () => {
 
-  const latitude = window.prompt(
-    'Enter latitude:'
-  )
+  error.value = ''
+  successMessage.value = ''
 
-  const longitude = window.prompt(
-    'Enter longitude:'
-  )
-
-  if (
-    latitude === null ||
-    longitude === null
-  ) {
-    return
-  }
-
-  const lat = Number(latitude)
-  const lng = Number(longitude)
-
-  if (
-    !Number.isFinite(lat) ||
-    !Number.isFinite(lng) ||
-    lat < -90 ||
-    lat > 90 ||
-    lng < -180 ||
-    lng > 180
-  ) {
-
+  if (!navigator.geolocation) {
     error.value =
-      'Please enter valid latitude and longitude.'
-
+      'Your browser does not support location services.'
     return
   }
 
-  selectedLocation.value = {
-    latitude: lat,
-    longitude: lng
-  }
+  locationLoading.value = true
 
-  error.value = ''
+  navigator.geolocation.getCurrentPosition(
+
+    position => {
+
+      console.log(
+        '📍 RAW BROWSER LOCATION:',
+        position
+      )
+
+      /*
+       * IMPORTANT:
+       * Capture the values immediately.
+       * Do NOT use any hardcoded coordinates.
+       */
+
+      const currentLatitude =
+        position.coords.latitude
+
+      const currentLongitude =
+        position.coords.longitude
+
+      const currentAccuracy =
+        position.coords.accuracy
+
+      console.log(
+        '📍 GPS COORDINATES:',
+        {
+          latitude: currentLatitude,
+          longitude: currentLongitude,
+          accuracy: currentAccuracy
+        }
+      )
+
+      /* -----------------------------------------------------
+         VALIDATE GPS
+      ----------------------------------------------------- */
+
+      if (
+        typeof currentLatitude !== 'number' ||
+        typeof currentLongitude !== 'number' ||
+        !Number.isFinite(currentLatitude) ||
+        !Number.isFinite(currentLongitude)
+      ) {
+
+        locationLoading.value = false
+
+        error.value =
+          'The browser returned an invalid location.'
+
+        return
+      }
+
+      /* -----------------------------------------------------
+         VALIDATE RANGE
+      ----------------------------------------------------- */
+
+      if (
+        currentLatitude < -90 ||
+        currentLatitude > 90 ||
+        currentLongitude < -180 ||
+        currentLongitude > 180
+      ) {
+
+        locationLoading.value = false
+
+        error.value =
+          'The GPS coordinates are outside a valid range.'
+
+        return
+      }
+
+      /*
+       * 0,0 is technically valid geographically,
+       * but it is not a realistic emergency location
+       * for this application.
+       */
+
+      if (
+        currentLatitude === 0 &&
+        currentLongitude === 0
+      ) {
+
+        locationLoading.value = false
+
+        error.value =
+          'Your browser returned 0,0 instead of your actual location. Please enable GPS/location access and try again.'
+
+        return
+      }
+
+      /* -----------------------------------------------------
+         SAVE EXACT GPS VALUES
+      ----------------------------------------------------- */
+
+      latitude.value = currentLatitude
+      longitude.value = currentLongitude
+
+      locationAccuracy.value =
+        Number.isFinite(currentAccuracy)
+          ? currentAccuracy
+          : ''
+
+      locationShared.value = true
+
+      locationLoading.value = false
+
+      successMessage.value =
+        'Your current live location has been captured successfully.'
+
+      console.log(
+        '✅ LOCATION SAVED IN FORM:',
+        {
+          latitude: latitude.value,
+          longitude: longitude.value,
+          accuracy: locationAccuracy.value
+        }
+      )
+    },
+
+    locationError => {
+
+      locationLoading.value = false
+
+      console.error(
+        '❌ GEOLOCATION ERROR:',
+        locationError
+      )
+
+      switch (locationError.code) {
+
+        case 1:
+          error.value =
+            'Location permission was denied. Please allow location access for this website.'
+          break
+
+        case 2:
+          error.value =
+            'Your location could not be determined. Please check your device GPS/location settings.'
+          break
+
+        case 3:
+          error.value =
+            'Location request timed out. Please try again.'
+          break
+
+        default:
+          error.value =
+            'Unable to get your current location.'
+      }
+    },
+
+    {
+      enableHighAccuracy: true,
+      timeout: 30000,
+      maximumAge: 0
+    }
+  )
 }
 
-// ------------------------------------
-// SUBMIT
-// ------------------------------------
+/* =========================================================
+   CLEAR LOCATION
+========================================================= */
 
-const submitEmergency = async () => {
+const clearLocation = () => {
 
-  error.value = ''
+  latitude.value = ''
+  longitude.value = ''
+  locationAccuracy.value = ''
+
+  locationShared.value = false
+
+  successMessage.value = ''
+}
+
+/* =========================================================
+   VALIDATE FORM
+========================================================= */
+
+const validateForm = () => {
 
   if (!selectedType.value) {
 
     error.value =
       'Please select the type of help needed.'
 
-    return
+    return false
   }
 
   if (!description.value.trim()) {
@@ -128,100 +277,451 @@ const submitEmergency = async () => {
     error.value =
       'Please describe the situation.'
 
-    return
+    return false
   }
 
-  if (!selectedLocation.value) {
+  if (!locationShared.value) {
 
     error.value =
-      'Please select a location.'
+      'Please share your live location before submitting.'
+
+    return false
+  }
+
+  /*
+   * IMPORTANT:
+   * Take immutable copies BEFORE Firestore write.
+   */
+
+  const currentLatitude =
+    Number(latitude.value)
+
+  const currentLongitude =
+    Number(longitude.value)
+
+  console.log(
+    '🔎 VALIDATING LOCATION BEFORE SUBMIT:',
+    {
+      latitude: currentLatitude,
+      longitude: currentLongitude
+    }
+  )
+
+  if (
+    !Number.isFinite(currentLatitude) ||
+    !Number.isFinite(currentLongitude)
+  ) {
+
+    error.value =
+      'Invalid GPS coordinates. Please refresh your location.'
+
+    return false
+  }
+
+  if (
+    currentLatitude < -90 ||
+    currentLatitude > 90
+  ) {
+
+    error.value =
+      'Invalid latitude.'
+
+    return false
+  }
+
+  if (
+    currentLongitude < -180 ||
+    currentLongitude > 180
+  ) {
+
+    error.value =
+      'Invalid longitude.'
+
+    return false
+  }
+
+  if (
+    currentLatitude === 0 &&
+    currentLongitude === 0
+  ) {
+
+    error.value =
+      'Invalid 0,0 location. Please refresh your GPS location.'
+
+    return false
+  }
+
+  return true
+}
+
+/* =========================================================
+   SUBMIT EMERGENCY
+========================================================= */
+
+const submitEmergency = async () => {
+
+  if (submitting.value) {
+    return
+  }
+
+  error.value = ''
+  successMessage.value = ''
+
+  /* -------------------------------------------------------
+     VALIDATE
+  ------------------------------------------------------- */
+
+  if (!validateForm()) {
+    return
+  }
+
+  /* -------------------------------------------------------
+     AUTH
+  ------------------------------------------------------- */
+
+  const user = auth.currentUser
+
+  if (!user) {
+
+    error.value =
+      'Your session has expired. Please login again.'
 
     return
   }
+
+  /*
+   * VERY IMPORTANT:
+   * Create immutable local variables.
+   *
+   * These are the exact coordinates that will be sent
+   * to Firestore.
+   */
+
+  const emergencyLatitude =
+    Number(latitude.value)
+
+  const emergencyLongitude =
+    Number(longitude.value)
+
+  const emergencyAccuracy =
+    locationAccuracy.value !== ''
+      ? Number(locationAccuracy.value)
+      : null
+
+  console.log(
+    '🚨 FINAL COORDINATES BEING SENT TO FIRESTORE:',
+    {
+      latitude: emergencyLatitude,
+      longitude: emergencyLongitude,
+      accuracy: emergencyAccuracy
+    }
+  )
+
+  /* -------------------------------------------------------
+     FINAL SAFETY CHECK
+  ------------------------------------------------------- */
+
+  if (
+    !Number.isFinite(emergencyLatitude) ||
+    !Number.isFinite(emergencyLongitude)
+  ) {
+
+    error.value =
+      'Location became invalid before submission. Please refresh your location.'
+
+    return
+  }
+
+  if (
+    emergencyLatitude === 0 &&
+    emergencyLongitude === 0
+  ) {
+
+    error.value =
+      'Invalid 0,0 coordinates. Please refresh your location.'
+
+    return
+  }
+
+  /* -------------------------------------------------------
+     SUBMIT
+  ------------------------------------------------------- */
+
+  submitting.value = true
 
   try {
 
-    submitting.value = true
+    /*
+     * FIRESTORE OBJECT
+     *
+     * Notice that latitude/longitude use the immutable
+     * emergencyLatitude/emergencyLongitude variables.
+     */
 
-    let docRef = null
-    const user = auth.currentUser
-    if (user) {
-      const severityMap = {
-        Low: 'Low',
-        Medium: 'Medium',
-        Critical: 'High'
-      }
-      docRef = await addDoc(collection(db, 'emergencies'), {
-        requesterId: user.uid,
-        requesterName: user.displayName || 'Help Seeker',
-        crisisId: 'default',
-        type: selectedType.value,
-        severity: severityMap[selectedPriority.value] || 'Low',
-        description: description.value.trim(),
-        address: null,
-        contact: null,
-        additionalInfo: null,
-        latitude: selectedLocation.value.latitude,
-        longitude: selectedLocation.value.longitude,
-        status: 'PENDING',
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      })
-    }
+    const emergencyData = {
 
-    const emergency = {
-      type: selectedType.value,
+      /* USER */
 
-      priority: selectedPriority.value,
+      requesterId:
+        user.uid,
+
+      requesterName:
+        user.displayName ||
+        user.email ||
+        'Help Seeker',
+
+      requesterEmail:
+        user.email || null,
+
+
+      /* EMERGENCY */
+
+      type:
+        selectedType.value,
+
+      priority:
+        selectedPriority.value,
+
+      severity:
+        selectedPriority.value,
 
       description:
         description.value.trim(),
 
+
+      /* LOCATION */
+
       latitude:
-        selectedLocation.value.latitude,
+        emergencyLatitude,
 
       longitude:
-        selectedLocation.value.longitude,
+        emergencyLongitude,
 
-      firestoreId: docRef ? docRef.id : null
+      locationShared:
+        true,
+
+      locationAccuracy:
+        emergencyAccuracy,
+
+      locationSource:
+        'browser-gps',
+
+      address:
+        address.value.trim() || null,
+
+
+      /* CONTACT */
+
+      contact:
+        contact.value.trim() || null,
+
+
+      /* ADDITIONAL INFO */
+
+      additionalInfo:
+        additionalInfo.value.trim() || null,
+
+
+      /* STATUS */
+
+      status:
+        'pending',
+
+
+      /* VOLUNTEER */
+
+      assignedVolunteer:
+        null,
+
+      assignedVolunteerId:
+        null,
+
+
+      /* CRISIS */
+
+      crisisId:
+        'default',
+
+
+      /* RESOLUTION */
+
+      resolutionProof:
+        null,
+
+      resolutionNote:
+        null,
+
+
+      /* TIMESTAMPS */
+
+      createdAt:
+        serverTimestamp(),
+
+      updatedAt:
+        serverTimestamp(),
+
+      acceptedAt:
+        null,
+
+      resolvedAt:
+        null
     }
 
-    const response =
-      await createEmergency(emergency)
+    /* -----------------------------------------------------
+       FINAL DEBUG
+    ----------------------------------------------------- */
 
     console.log(
-      '🚨 Emergency created:',
-      response
+      '🔥 FIRESTORE DATA:',
+      {
+        latitude:
+          emergencyData.latitude,
+
+        longitude:
+          emergencyData.longitude,
+
+        locationSource:
+          emergencyData.locationSource
+      }
     )
+
+    /* -----------------------------------------------------
+       FIRESTORE WRITE
+    ----------------------------------------------------- */
+
+    const docRef =
+      await addDoc(
+        collection(
+          db,
+          'emergencies'
+        ),
+        emergencyData
+      )
+
+    console.log(
+      '✅ EMERGENCY CREATED:',
+      docRef.id
+    )
+
+    console.log(
+      '📍 STORED LOCATION:',
+      {
+        latitude:
+          emergencyData.latitude,
+
+        longitude:
+          emergencyData.longitude
+      }
+    )
+
+    /* -----------------------------------------------------
+       CREATED OBJECT
+    ----------------------------------------------------- */
+
+    const emergency = {
+
+      ...emergencyData,
+
+      firestoreId:
+        docRef.id,
+
+      _id:
+        docRef.id
+    }
+
+    /* -----------------------------------------------------
+       SEND TO PARENT
+    ----------------------------------------------------- */
 
     emit(
       'created',
-      response.emergency
+      emergency
     )
+
+    /* -----------------------------------------------------
+       RESET
+    ----------------------------------------------------- */
+
+    resetForm()
+
+    /* -----------------------------------------------------
+       CLOSE
+    ----------------------------------------------------- */
 
     emit('close')
 
-  } catch (err) {
+  }
+
+  catch (err) {
 
     console.error(
-      '❌ Failed to create emergency:',
+      '❌ FAILED TO CREATE EMERGENCY:',
       err
     )
 
-    error.value =
-      err.response?.data?.message ||
-      'Failed to submit emergency.'
+    if (
+      err?.code ===
+      'permission-denied'
+    ) {
 
-  } finally {
+      error.value =
+        'Firestore permission denied. Check your Firebase security rules.'
+
+    }
+
+    else if (
+      err?.code ===
+      'unauthenticated'
+    ) {
+
+      error.value =
+        'Your Firebase session expired. Please login again.'
+
+    }
+
+    else {
+
+      error.value =
+        err?.message ||
+        'Failed to submit emergency.'
+    }
+
+  }
+
+  finally {
 
     submitting.value = false
 
   }
 }
 
-// ------------------------------------
-// CLOSE
-// ------------------------------------
+/* =========================================================
+   RESET
+========================================================= */
+
+const resetForm = () => {
+
+  selectedType.value = ''
+  selectedPriority.value = 'Low'
+
+  description.value = ''
+  address.value = ''
+  contact.value = ''
+  additionalInfo.value = ''
+
+  latitude.value = ''
+  longitude.value = ''
+
+  locationAccuracy.value = ''
+
+  locationShared.value = false
+
+  successMessage.value = ''
+}
+
+/* =========================================================
+   CLOSE
+========================================================= */
 
 const close = () => {
 
@@ -231,543 +731,4 @@ const close = () => {
 
   emit('close')
 }
-
 </script>
-
-<template>
-
-  <div
-    class="modal-overlay"
-    @click.self="close"
-  >
-
-    <div class="report-modal">
-
-      <!-- HEADER -->
-
-      <div class="modal-header">
-
-        <div>
-
-          <h2>
-            Report an Emergency
-          </h2>
-
-          <p>
-            Tell us what help is needed.
-          </p>
-
-        </div>
-
-        <button
-          class="close-button"
-          @click="close"
-        >
-          ✕
-        </button>
-
-      </div>
-
-
-      <!-- ERROR -->
-
-      <div
-        v-if="error"
-        class="error-box"
-      >
-        ⚠️ {{ error }}
-      </div>
-
-
-      <!-- HELP TYPE -->
-
-      <div class="form-section">
-
-        <label>
-          What kind of help is needed?
-        </label>
-
-        <div class="help-grid">
-
-          <button
-            v-for="item in helpTypes"
-            :key="item.type"
-            class="help-option"
-            :class="{
-              selected:
-                selectedType === item.type
-            }"
-            @click="
-              selectHelpType(item.type)
-            "
-          >
-
-            <span>
-              {{ item.icon }}
-            </span>
-
-            {{ item.type }}
-
-          </button>
-
-        </div>
-
-      </div>
-
-
-      <!-- PRIORITY -->
-
-      <div class="form-section">
-
-        <label>
-          Priority
-        </label>
-
-        <div class="priority-options">
-
-          <label>
-
-            <input
-              v-model="selectedPriority"
-              type="radio"
-              value="Low"
-              name="priority"
-            >
-
-            Low
-
-          </label>
-
-          <label>
-
-            <input
-              v-model="selectedPriority"
-              type="radio"
-              value="Medium"
-              name="priority"
-            >
-
-            Medium
-
-          </label>
-
-          <label>
-
-            <input
-              v-model="selectedPriority"
-              type="radio"
-              value="Critical"
-              name="priority"
-            >
-
-            Critical
-
-          </label>
-
-        </div>
-
-      </div>
-
-
-      <!-- DESCRIPTION -->
-
-      <div class="form-section">
-
-        <label for="description">
-          Describe the situation
-        </label>
-
-        <textarea
-          id="description"
-          v-model="description"
-          placeholder="Tell us what is happening..."
-          rows="4"
-        ></textarea>
-
-      </div>
-
-
-      <!-- LOCATION -->
-
-      <div class="form-section">
-
-        <label>
-          Location
-        </label>
-
-        <button
-          class="location-selector"
-          @click="selectLocation"
-        >
-
-          <span>
-            📍
-          </span>
-
-          <span
-            v-if="selectedLocation"
-          >
-
-            {{
-              selectedLocation.latitude.toFixed(5)
-            }},
-            {{
-              selectedLocation.longitude.toFixed(5)
-            }}
-
-          </span>
-
-          <span v-else>
-            Select location
-          </span>
-
-        </button>
-
-        <p class="location-hint">
-          For now, enter the coordinates of the
-          emergency location.
-        </p>
-
-      </div>
-
-
-      <!-- SUBMIT -->
-
-      <button
-        class="submit-button"
-        :disabled="submitting"
-        @click="submitEmergency"
-      >
-
-        <span v-if="submitting">
-          Submitting...
-        </span>
-
-        <span v-else>
-          🚨 Submit Emergency
-        </span>
-
-      </button>
-
-    </div>
-
-  </div>
-
-</template>
-
-<style scoped>
-
-.modal-overlay {
-  position: fixed;
-
-  inset: 0;
-
-  background:
-    rgba(17, 24, 39, 0.45);
-
-  display: flex;
-
-  align-items: center;
-
-  justify-content: center;
-
-  padding: 16px;
-
-  z-index: 5000;
-}
-
-.report-modal {
-  width: 480px;
-
-  max-width: 100%;
-
-  max-height: 90vh;
-
-  overflow-y: auto;
-
-  background: white;
-
-  border-radius: 16px;
-
-  padding: 24px;
-
-  box-shadow:
-    0 20px 50px
-    rgba(0, 0, 0, 0.2);
-}
-
-
-/* HEADER */
-
-.modal-header {
-  display: flex;
-
-  justify-content:
-    space-between;
-
-  align-items:
-    flex-start;
-
-  margin-bottom: 22px;
-}
-
-.modal-header h2 {
-  margin: 0;
-
-  font-size: 21px;
-
-  color: #111827;
-}
-
-.modal-header p {
-  margin: 5px 0 0;
-
-  font-size: 13px;
-
-  color: #6b7280;
-}
-
-.close-button {
-  border: none;
-
-  background: #f3f4f6;
-
-  width: 32px;
-
-  height: 32px;
-
-  border-radius: 50%;
-
-  font-size: 14px;
-}
-
-
-/* ERROR */
-
-.error-box {
-  margin-bottom: 18px;
-
-  padding: 10px 12px;
-
-  border-radius: 8px;
-
-  background: #fef2f2;
-
-  border: 1px solid #fecaca;
-
-  color: #dc2626;
-
-  font-size: 12px;
-
-  font-weight: 600;
-}
-
-
-/* FORM */
-
-.form-section {
-  margin-bottom: 20px;
-}
-
-.form-section > label {
-  display: block;
-
-  margin-bottom: 9px;
-
-  font-size: 14px;
-
-  font-weight: 600;
-
-  color: #374151;
-}
-
-
-/* HELP */
-
-.help-grid {
-  display: grid;
-
-  grid-template-columns:
-    repeat(2, 1fr);
-
-  gap: 9px;
-}
-
-.help-option {
-  border: 1px solid #e5e7eb;
-
-  background: #fafafa;
-
-  padding: 13px;
-
-  border-radius: 9px;
-
-  display: flex;
-
-  align-items: center;
-
-  gap: 9px;
-
-  font-size: 13px;
-
-  color: #374151;
-
-  transition: 0.2s;
-}
-
-.help-option span {
-  font-size: 19px;
-}
-
-.help-option:hover {
-  border-color: #ef4444;
-
-  background: #fff5f5;
-}
-
-.help-option.selected {
-  border-color: #ef4444;
-
-  background: #fff1f2;
-
-  color: #dc2626;
-
-  font-weight: 700;
-}
-
-
-/* PRIORITY */
-
-.priority-options {
-  display: flex;
-
-  gap: 18px;
-
-  flex-wrap: wrap;
-}
-
-.priority-options label {
-  display: flex;
-
-  align-items: center;
-
-  gap: 5px;
-
-  font-size: 13px;
-
-  cursor: pointer;
-}
-
-
-/* DESCRIPTION */
-
-textarea {
-  width: 100%;
-
-  resize: vertical;
-
-  border:
-    1px solid #d1d5db;
-
-  border-radius: 9px;
-
-  padding: 11px;
-
-  font-size: 13px;
-
-  outline: none;
-}
-
-textarea:focus {
-  border-color: #ef4444;
-}
-
-
-/* LOCATION */
-
-.location-selector {
-  width: 100%;
-
-  border:
-    1px solid #d1d5db;
-
-  background: #f9fafb;
-
-  padding: 11px;
-
-  border-radius: 9px;
-
-  display: flex;
-
-  align-items: center;
-
-  gap: 8px;
-
-  text-align: left;
-
-  color: #374151;
-
-  font-size: 13px;
-}
-
-.location-selector:hover {
-  background: #f3f4f6;
-}
-
-.location-hint {
-  margin: 6px 0 0;
-
-  font-size: 10px;
-
-  color: #9ca3af;
-}
-
-
-/* SUBMIT */
-
-.submit-button {
-  width: 100%;
-
-  border: none;
-
-  background: #ef4444;
-
-  color: white;
-
-  padding: 13px;
-
-  border-radius: 9px;
-
-  font-size: 14px;
-
-  font-weight: 700;
-
-  transition: 0.2s;
-}
-
-.submit-button:hover {
-  background: #dc2626;
-}
-
-.submit-button:disabled {
-  opacity: 0.6;
-
-  cursor: not-allowed;
-}
-
-
-/* MOBILE */
-
-@media (max-width: 500px) {
-
-  .report-modal {
-    padding: 18px;
-  }
-
-  .help-grid {
-    grid-template-columns: 1fr;
-  }
-
-}
-
-</style>
